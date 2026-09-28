@@ -159,7 +159,7 @@ final class Theme {
         TextView t = new TextView(c);
         t.setText(text);
         t.setTextColor(p.title);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
         return t;
     }
 
@@ -179,6 +179,40 @@ final class Theme {
         t.setTextColor(p.sub);
         t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
         t.setLetterSpacing(0.08f);
+        return t;
+    }
+
+    /** 分组标题：弱化小字，压在每张组卡片上方。 */
+    static TextView groupTitle(Context c, Palette p, String text) {
+        TextView t = cardTitle(c, p, text);
+        t.setPadding(0, 0, 0, 0);
+        return t;
+    }
+
+    /** 折叠行 / 组内功能行的标题：正常字号、一级色。 */
+    static TextView rowTitle(Context c, Palette p, String text) {
+        TextView t = new TextView(c);
+        t.setText(text);
+        t.setTextColor(p.title);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        return t;
+    }
+
+    /** 折叠头右侧的状态摘要（如「11 项 · 已隐藏 2」）。 */
+    static TextView rowSummary(Context c, Palette p, String text) {
+        TextView t = new TextView(c);
+        t.setText(text);
+        t.setTextColor(p.sub);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        return t;
+    }
+
+    /** 滑杆行右侧的高亮数值（主色压深版，白底可读）。 */
+    static TextView blockValue(Context c, Palette p, String text) {
+        TextView t = new TextView(c);
+        t.setText(text);
+        t.setTextColor(p.primaryInk);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         return t;
     }
 
@@ -208,7 +242,7 @@ final class Theme {
         s.setTextColor(p.body);
         s.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         s.setChecked(checked);
-        s.setPadding(0, dp(c, 6), 0, dp(c, 6));
+        s.setPadding(0, dp(c, 1), 0, dp(c, 1));
         styleSwitch(c, p, s);
         return s;
     }

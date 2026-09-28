@@ -85,6 +85,40 @@ public class RGModule extends XposedModule {
         } catch (Throwable t) {
             log(Log.ERROR, TAG, "hookPlayerTweaks failed", t);
         }
+        try {
+            NoUpdate.hook(this, appLoader);
+            log(Log.INFO, TAG, "hooked no-update");
+        } catch (Throwable t) {
+            log(Log.ERROR, TAG, "hookNoUpdate failed", t);
+        }
+        try {
+            hookViewAttach();
+            log(Log.INFO, TAG, "hooked view-attach");
+        } catch (Throwable t) {
+            log(Log.ERROR, TAG, "hookViewAttach failed", t);
+        }
+    }
+
+    /**
+     * 新视图挂到窗口上时，立刻补一次界面设置（而不是等下一轮 1.2s 循环）。
+     *
+     * <p>播放页/浮层都是新 inflate 的（ViewPager 每页一套实例），等待周期循环的
+     * 那段时间里组件会以「宿主原样」显示 —— 表现就是切视频时透明度闪一下。
+     * 见 {@link UiController#onViewAttached()}（内部做了合并与限流）。
+     *
+     * <p>这是全进程每个 View 挂载都会走的点，所以回调体必须极轻：
+     * 只做两次 volatile 读 + 必要时 post 一个消息。
+     */
+    private void hookViewAttach() throws Throwable {
+        Method m = View.class.getDeclaredMethod("onAttachedToWindow");
+        m.setAccessible(true);
+        hook(m).setId("rgViewAttach")
+                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                .intercept(chain -> {
+                    Object r = chain.proceed();     // 先让视图真正挂上去
+                    UiController.onViewAttached();
+                    return r;
+                });
     }
 
     /* ------------------------------------------------------------------ */
@@ -201,12 +235,18 @@ public class RGModule extends XposedModule {
                         .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                         .intercept(chain -> {
                             Activity act = UiController.activityOf(chain.getThisObject());
-                            // 双击开评论开启时一律屏蔽（横竖屏都是）：
+                            // 只在「本页面确实由模块接管双击评论」时屏蔽：
                             // 正常路径下触发前的点击已被 UiController 吞掉，
                             // 宿主收不到完整连击；这里再挡一道兜底，确保不暂停、不点赞。
-                            if (act != null && Config.doubleTapComment(act)) {
+                            //
+                            // 判据必须与 UiController.needSwallow 完全一致 —— 曾经按
+                            // Config.doubleTapComment() 无条件屏蔽，结果横屏若走进竖屏分支
+                            // （方向判定不一致 / 用户关了横屏手势），宿主的「双击暂停」
+                            // 被模块屏蔽掉、模块自己又不处理，双击就彻底没反应了。
+                            if (act != null && UiController.gestureTakeover(act)) {
                                 UiController.logFile("dt: blocked onDoubleTap on "
-                                        + chain.getThisObject().getClass().getName());
+                                        + chain.getThisObject().getClass().getName()
+                                        + " act=" + act.getClass().getSimpleName());
                                 return Boolean.FALSE;
                             }
                             return chain.proceed();

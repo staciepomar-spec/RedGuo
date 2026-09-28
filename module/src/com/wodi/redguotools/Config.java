@@ -168,9 +168,22 @@ public final class Config {
         return get(c, "dt_comment", true);
     }
 
-    /** 找不到宿主的双击回调时，是否吞掉第二次点击（可确保不触发点赞）。 */
-    public static boolean doubleTapSwallow(Context c) {
-        return get(c, "dt_swallow", true);
+    /**
+     * 横屏下是否也启用「三击打开评论区」手势。**默认关闭。**
+     *
+     * <p><b>为什么默认关闭：</b>横屏的「三击开评论区」与宿主的「双击暂停」在实现上
+     * 互斥 —— 三击要求把第 1、2 击**吞掉**（不让宿主看到），否则宿主的双击检测
+     * 会吃掉中间态；而双击/单击暂停恰恰要求这些点击**送达宿主**。
+     * 两者无法同时成立，所以只能二选一，默认选「保住原生双击暂停」。
+     *
+     * <p>关闭时（默认）横屏**完全不干预**：不计数、不吞点击、也不屏蔽宿主的
+     * {@code onDoubleTap}，单击/双击暂停与边缘长按倍速全部按宿主原样工作。
+     *
+     * <p>开启后横屏变成「三击」模式：整段连击被吞掉以稳定进评论区，
+     * 代价是横屏双击不再暂停。需要时在面板「手势」卡片里手动打开。
+     */
+    public static boolean landscapeGesture(Context c) {
+        return get(c, "dt_land", false);
     }
 
     /* ---------------- 组件槽位：隐藏 / 透明度 ---------------- */
@@ -326,13 +339,67 @@ public final class Config {
         set(c, "speed_on", v);
     }
 
-    /** 自定义倍速值 ×10（10~40 = 1.0~4.0 倍）。 */
+    /**
+     * 自定义倍速值 ×10（10~40 = 1.0~4.0 倍）。
+     *
+     * <p>这是「常规播放速率」。PlayerTweaks 通过**调用栈**区分「用户选速」与
+     * 「边缘长按临时倍速」（见 {@code PlayerTweaks.isTemporarySpeed()}），
+     * 不再依赖数值比较，所以本值的取值域可以自由调整。
+     */
     public static int speedCustom(Context c) {
         return getInt(c, "speed_x10", 20);
     }
 
     public static void setSpeedCustom(Context c, int v) {
         setInt(c, "speed_x10", Math.max(10, Math.min(40, v)));
+    }
+
+    /**
+     * 长按边缘临时倍速值 ×10（10~40 = 1.0~4.0 倍），默认 20 = 2.0x
+     * （与宿主自身的长按提速峰值一致，即默认不改变宿主行为）。
+     *
+     * <p>宿主的长按提速峰值是**硬编码 2.0x**，PlayerTweaks 会把该值改写成这里的配置值。
+     */
+    public static int pressSpeedCustom(Context c) {
+        return getInt(c, "press_x10", 20);
+    }
+
+    public static void setPressSpeedCustom(Context c, int v) {
+        setInt(c, "press_x10", Math.max(10, Math.min(40, v)));
+    }
+
+    /** 清屏态下「无操作多少秒」自动收起其余控件（3~60 秒，默认 10）。 */
+    public static int clearIdleSec(Context c) {
+        return getInt(c, "clear_idle_s", 10);
+    }
+
+    public static void setClearIdleSec(Context c, int v) {
+        setInt(c, "clear_idle_s", Math.max(3, Math.min(60, v)));
+    }
+
+    /** 屏蔽「发现新版本」升级弹窗。默认开启（用户明确提出要屏蔽）。 */
+    public static boolean blockUpdate(Context c) {
+        return get(c, "no_update", true);
+    }
+
+    public static void setBlockUpdate(Context c, boolean v) {
+        set(c, "no_update", v);
+    }
+
+    /**
+     * 「暂停时还原组件显示」。**默认开启。**
+     *
+     * <p>效果：视频暂停时把模块改过的 alpha 全部还原成宿主原值，被模块隐藏的组件
+     * 也临时显示出来，方便看清界面（读剧名、挑选集等）；恢复播放时重新套用透明度
+     * 并重新隐藏。清屏（清屏省心）模式下不强制显示隐藏的组件。
+     * 首页信息流与二级播放页都生效。
+     */
+    public static boolean pauseRestore(Context c) {
+        return get(c, "pause_restore", true);
+    }
+
+    public static void setPauseRestore(Context c, boolean v) {
+        set(c, "pause_restore", v);
     }
 
     /* ---------------- 底部导航栏 / 小白条：自动隐藏 ---------------- */
