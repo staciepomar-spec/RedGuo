@@ -322,7 +322,16 @@ final class PlayerTweaks {
         sPressAt = now;
 
         if (newPress) {
-            // 新的一次长按：这一笔就是提速
+            // 新的一次长按：宿主长按提速首笔恒为硬编码峰值 2.0f（e55/l.smali）。
+            // 若这一笔不是 2.0，绝不能当提速改写 —— 典型场景：按住超过 3 秒被
+            // 下方超时切段，松手回落写 1.0 被误判成新长按，会把松手后的速度
+            // 钉在长按倍速上（v2.68 日志实测大量 "press speed 1.0 -> 3.2"）。
+            // 放行即可，退化情形（宿主未来改峰值）也只是长按不加速，不会错乱。
+            if (Math.abs(orig - 2.0f) > 0.001f) {
+                sInPress = false;
+                logSpeedPassthrough(orig);
+                return chain.proceed();
+            }
             sInPress = true;
             sPressVal = orig;
             return applyPress(chain, orig);

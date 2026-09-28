@@ -459,7 +459,7 @@ public final class SettingsPanel {
         final TextView pressLabel = blockLabelRow(a, p, ex.body,
                 "长按倍速", (Config.pressSpeedCustom(a) / 10f) + "x");
         SeekBar sbPress = new SeekBar(a);
-        sbPress.setMax(30);   // 10~40 => 1.0x~4.0x
+        sbPress.setMax(10);   // 10~20 => 1.0x~2.0x（宿主引擎对速率有 2.0x 硬上限）
         sbPress.setProgress(Config.pressSpeedCustom(a) - 10);
         Theme.styleSeekBar(p, sbPress);
         sbPress.setOnSeekBarChangeListener(new SimpleSeek() {
@@ -476,7 +476,7 @@ public final class SettingsPanel {
         });
         ex.body.addView(sbPress);
         TextView pressHint = Theme.hint(a, p,
-                "在画面边缘长按临时提速到该倍率，松手恢复常规倍速。默认 2.0x（=宿主峰值）。");
+                "在画面边缘长按临时提速到该倍率，松手恢复常规倍速。上限 2.0x：宿主播放器会丢弃超过 2.0 的提速值（设更高时长按不会加速）。");
         pressHint.setPadding(0, 0, 0, Theme.dp(a, 6));
         ex.body.addView(pressHint);
 

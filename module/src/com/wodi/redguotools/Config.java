@@ -355,17 +355,22 @@ public final class Config {
     }
 
     /**
-     * 长按边缘临时倍速值 ×10（10~40 = 1.0~4.0 倍），默认 20 = 2.0x
+     * 长按边缘临时倍速值 ×10（10~20 = 1.0~2.0 倍），默认 20 = 2.0x
      * （与宿主自身的长按提速峰值一致，即默认不改变宿主行为）。
      *
      * <p>宿主的长按提速峰值是**硬编码 2.0x**，PlayerTweaks 会把该值改写成这里的配置值。
+     *
+     * <p><b>为什么上限只有 2.0x</b>：宿主播放器（TTVideoEngine）对速率有 2.0x
+     * 的硬上限，改写值超过 2.0 会被引擎直接丢弃（v2.68 实测：2.3/2.6/3.2/4.0
+     * 全部「长按不提速」，2.0 及以下正常）。历史版本曾允许到 4.0x（v2.42~2.68），
+     * 属于 UI 承诺了引擎做不到的范围，读取侧同步钳制以兼容已存的大值（如 40）。
      */
     public static int pressSpeedCustom(Context c) {
-        return getInt(c, "press_x10", 20);
+        return Math.max(10, Math.min(20, getInt(c, "press_x10", 20)));
     }
 
     public static void setPressSpeedCustom(Context c, int v) {
-        setInt(c, "press_x10", Math.max(10, Math.min(40, v)));
+        setInt(c, "press_x10", Math.max(10, Math.min(20, v)));
     }
 
     /** 清屏态下「无操作多少秒」自动收起其余控件（3~60 秒，默认 10）。 */
