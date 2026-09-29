@@ -382,6 +382,18 @@ public final class Config {
         setInt(c, "clear_idle_s", Math.max(3, Math.min(60, v)));
     }
 
+    /**
+     * 清屏态下「无操作自动收起控件」总开关。默认开启 —— 关闭后清屏状态
+     * 不再定时收起，已收起的立即恢复；收起秒数仍由 {@link #clearIdleSec} 控制。
+     */
+    public static boolean idleHideOn(Context c) {
+        return get(c, "idle_hide_on", true);
+    }
+
+    public static void setIdleHideOn(Context c, boolean v) {
+        set(c, "idle_hide_on", v);
+    }
+
     /** 屏蔽「发现新版本」升级弹窗。默认开启（用户明确提出要屏蔽）。 */
     public static boolean blockUpdate(Context c) {
         return get(c, "no_update", true);
@@ -392,7 +404,7 @@ public final class Config {
     }
 
     /**
-     * 「暂停时还原组件显示」。**默认开启。**
+     * 「暂停时还原组件显示」。默认关闭（v2.70 起：多数用户不需要，被反馈「暂停回弹」）。
      *
      * <p>效果：视频暂停时把模块改过的 alpha 全部还原成宿主原值，被模块隐藏的组件
      * 也临时显示出来，方便看清界面（读剧名、挑选集等）；恢复播放时重新套用透明度
@@ -400,7 +412,7 @@ public final class Config {
      * 首页信息流与二级播放页都生效。
      */
     public static boolean pauseRestore(Context c) {
-        return get(c, "pause_restore", true);
+        return get(c, "pause_restore", false);
     }
 
     public static void setPauseRestore(Context c, boolean v) {

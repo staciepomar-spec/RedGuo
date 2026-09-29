@@ -533,7 +533,15 @@ public final class SettingsPanel {
                 });
         divider(a, p, card);
 
-        // 清屏省心：单一数值项，直接露出不折叠
+        // 清屏省心：总开关 + 单一数值项，直接露出不折叠
+        switchRow(a, p, card, "清屏后自动收起控件", Config.idleHideOn(a),
+                new CompoundButton.OnCheckedChangeListener() {
+                    @Override
+                    public void onCheckedChanged(CompoundButton b, boolean v) {
+                        Config.setIdleHideOn(a, v);
+                    }
+                });
+        divider(a, p, card);
         TextView idleLabel = blockLabelRow(a, p, card,
                 "清屏自动收起（仅二级播放页）", Config.clearIdleSec(a) + " 秒");
         SeekBar sbIdle = new SeekBar(a);

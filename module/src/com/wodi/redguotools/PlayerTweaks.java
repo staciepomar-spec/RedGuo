@@ -155,7 +155,7 @@ final class PlayerTweaks {
                         .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                         .intercept(chain -> {
                             rememberEngine(chain.getThisObject());
-                            markPaused(false, "play");
+                            markPaused(false, "play", chain.getThisObject());
                             return chain.proceed();
                         });
                 n++;
@@ -166,7 +166,7 @@ final class PlayerTweaks {
                         .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                         .intercept(chain -> {
                             rememberEngine(chain.getThisObject());
-                            markPaused(true, "pause");
+                            markPaused(true, "pause", chain.getThisObject());
                             return chain.proceed();
                         });
                 n++;
@@ -184,7 +184,7 @@ final class PlayerTweaks {
                                 rememberEngine(chain.getThisObject());
                                 Object r = chain.proceed();
                                 if (r instanceof Integer) {
-                                    noteState(((Integer) r).intValue());
+                                    noteState(((Integer) r).intValue(), chain.getThisObject());
                                 }
                                 return r;
                             });
@@ -224,16 +224,16 @@ final class PlayerTweaks {
      * 会把刚置上的暂停状态立刻清掉，导致暂停恢复永远不触发。
      * 状态码本身可靠，就不需要这个不可靠的兜底了。
      */
-    private static void noteState(int st) {
+    private static void noteState(int st, Object engine) {
         if (st == sLastState) {
             return;
         }
         sLastState = st;
-        UiController.logFile("player: state=" + st + " paused=" + sPaused);
+        UiController.logFile("player: state=" + st + " paused=" + sPaused + " " + engTag(engine));
         if (st == 1) {
-            markPaused(false, "state=1");
+            markPaused(false, "state=1", engine);
         } else if (st == 2) {
-            markPaused(true, "state=2");
+            markPaused(true, "state=2", engine);
         }
     }
 
@@ -251,12 +251,29 @@ final class PlayerTweaks {
      * 记录播放/暂停状态变化。只在**状态真的翻转**时落盘，
      * 避免宿主频繁调用 play/pause 时刷日志；同时也方便真机核对状态是否准确。
      */
-    private static void markPaused(boolean paused, String how) {
+    private static void markPaused(boolean paused, String how, Object engine) {
         if (sPaused == paused) {
             return;
         }
         sPaused = paused;
-        UiController.logFile("player: " + (paused ? "PAUSED" : "PLAYING") + " (" + how + ")");
+        UiController.logFile("player: " + (paused ? "PAUSED" : "PLAYING") + " (" + how + ") "
+                + engTag(engine));
+    }
+
+    /**
+     * 引擎实例标识（v2.71 起加进 play/pause/state 日志）。
+     *
+     * <p>为什么：播放页同时存在多个 TTVideoEngine 实例（首页 feed 播放器 +
+     * 二级页播放器 + ViewPager 预加载的邻页），而 sPaused 是全局单例 ——
+     * 任何一个引擎的 pause 都会翻转全局状态。用户反馈「从首页点看全集进去
+     * 后自动暂停」，旧日志无法区分这次 pause 是可见引擎还是 feed/邻页引擎
+     * 发出的，定位不了。带上 identityHashCode 后，新日志一眼可分。
+     */
+    private static String engTag(Object engine) {
+        if (engine == null) {
+            return "@null";
+        }
+        return "@e" + Integer.toHexString(System.identityHashCode(engine));
     }
 
     /**

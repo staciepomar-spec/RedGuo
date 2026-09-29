@@ -36,6 +36,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.WeakHashMap;
@@ -938,6 +939,10 @@ public final class UiController {
      */
     private static void applyIdleClear(ViewGroup root, Activity a) {
         if (!isPlayPage(a)) {
+            return;
+        }
+        if (!Config.idleHideOn(a)) {
+            restoreIdleHidden(a);   // 开关刚关：已收起的立即恢复
             return;
         }
         List<View> hid = IDLE_HIDDEN.get(a);
@@ -2353,10 +2358,17 @@ public final class UiController {
             View target = findByDescription(decor, "评论");
             if (target != null) {
                 clickable = nearestClickable(target);
+                // v2.72 诊断：二级播放页双击开评论区失效（实测点到通用 FrameLayout），
+                // 旧日志看不出规则 1 到底命中了谁 —— 现在把命中与上溯结果都落盘。
+                logFile("comment r1 desc=\"" + target.getContentDescription() + "\" hit="
+                        + viewTag(target) + " -> " + viewTag(clickable));
             }
             // 2) 按类名找评论区入口那一格
             if (clickable == null) {
                 clickable = findCommentByClass(a, decor, false);
+                if (clickable != null) {
+                    logFile("comment r2 class -> " + viewTag(clickable));
+                }
             }
             // 2b) 控制栏自动隐藏 / 清屏都会把右侧互动栏整层收起（isShown=false），
             //     但视图仍在树上、performClick 照常派发 —— 放宽可见性再找一次。
@@ -2365,6 +2377,9 @@ public final class UiController {
             //     （实测 7.3.9.32：清屏模式双击打开了 CSSPlayletCommentListActivity）。
             if (clickable == null) {
                 clickable = findCommentByClass(a, decor, true);
+                if (clickable != null) {
+                    logFile("comment r2b class+hidden -> " + viewTag(clickable));
+                }
             }
             // 3) 兜底：右侧那一列可点击控件的第 2 个（收藏 / 评论 / 点赞 / 分享）
             //
@@ -2375,6 +2390,9 @@ public final class UiController {
             //    所以任何「按可见性筛」的宽泛兜底在横屏都不可信。横屏宁可不点。
             if (clickable == null && !land) {
                 clickable = guessRightColumn(decor, 1);
+                if (clickable != null) {
+                    logFile("comment r3 guess -> " + viewTag(clickable));
+                }
             }
             if (clickable == null) {
                 logFile("comment target not found landscape=" + land);
@@ -2390,6 +2408,17 @@ public final class UiController {
         } catch (Throwable t) {
             logFile("openComment failed: " + t);
         }
+    }
+
+    /** 评论入口诊断用：类名 + 资源 id + 是否可点击，一行能看清点的是谁。 */
+    private static String viewTag(View v) {
+        if (v == null) {
+            return "null";
+        }
+        String cls = v.getClass().getName();
+        int dot = cls.lastIndexOf('.');
+        String id = v.getId() == View.NO_ID ? "noid" : ("0x" + Integer.toHexString(v.getId()));
+        return cls.substring(dot + 1) + "/" + id + (v.isClickable() ? "" : "!c");
     }
 
     /** 视图是否真的在当前屏幕内（预 inflation 的页外实例会被这个条件排除）。 */
@@ -2415,15 +2444,17 @@ public final class UiController {
         for (String suffix : COMMENT_CLASSES) {
             for (View v : collectByClassSuffix(decor, suffix)) {
                 if (allowHidden) {
-                    // 只要求自身 VISIBLE：清屏把祖先 GONE 后，子视图的宽高可能一并被清零，
-                    // 但 performClick 不依赖尺寸，照常派发（实测 v2.63 前提）
-                    if (v.getVisibility() != View.VISIBLE) {
-                        continue;
-                    }
+                    // v2.73：不再要求「自身 VISIBLE」。新版宿主（实测报告者设备）会把
+                    // 评论格整格 GONE（vis=8、宽高清零），兄弟格（收藏/点赞/分享）仍
+                    // 可见 —— 原判据正好把它排除，导致一路落到 guessRightColumn 兜底
+                    // 点了收藏。performClick 不检查可见性，GONE 照常派发；类名后缀本身
+                    // 已足够特异。v2.63 的原判据针对的是「宿主只藏祖先层」的清屏场景。
+                    // 点了没反应也比点错收藏强（宁可不点不点错由 guessRightColumn
+                    // 的黑名单保证）。
                 } else if (!onScreen(v, a)) {
                     continue;
                 }
-                View c = firstClickable(v);
+                View c = firstClickable(v, allowHidden);
                 if (c != null) {
                     return c;
                 }
@@ -2432,8 +2463,13 @@ public final class UiController {
         return null;
     }
 
-    /** 自己可点击就返回自己，否则返回子树里第一个可点击的子节点。 */
-    private static View firstClickable(View v) {
+    /**
+     * 自己可点击就返回自己，否则返回子树里第一个可点击的子节点。
+     *
+     * @param ignoreSize 忽略子节点宽高（{@code allowHidden} 场景：评论格被整格 GONE
+     *                   时子节点宽高一并清零，但 performClick 照常派发，不依赖尺寸）
+     */
+    private static View firstClickable(View v, boolean ignoreSize) {
         if (v.isClickable()) {
             return v;
         }
@@ -2441,8 +2477,8 @@ public final class UiController {
             ViewGroup g = (ViewGroup) v;
             for (int i = 0; i < g.getChildCount(); i++) {
                 View c = g.getChildAt(i);
-                if (c.getWidth() > 0 && c.getHeight() > 0) {
-                    View r = firstClickable(c);
+                if (ignoreSize || (c.getWidth() > 0 && c.getHeight() > 0)) {
+                    View r = firstClickable(c, ignoreSize);
                     if (r != null) {
                         return r;
                     }
@@ -2482,6 +2518,17 @@ public final class UiController {
     private static View guessRightColumn(View root, int index) {
         final List<View> cands = new ArrayList<>();
         collectRightClickable(root, cands);
+        // v2.73 黑名单：兜底只许点「可能是评论」的格子。新版宿主右列是
+        // ssbiz.collect.ui.b（收藏）/ ssbiz.like.ui.b（点赞），类名混淆后与评论格
+        // 同为单字母，位置排序又会随版本漂移 —— 实测报告者设备上兜底点中了收藏格，
+        // 表现即「双击成了收藏」。收藏/点赞/分享动作有副作用，宁可放弃也不误点。
+        for (Iterator<View> it = cands.iterator(); it.hasNext(); ) {
+            String cn = it.next().getClass().getName().toLowerCase();
+            if (cn.contains("collect") || cn.contains("digg")
+                    || cn.contains(".like.") || cn.endsWith(".like")) {
+                it.remove();
+            }
+        }
         Collections.sort(cands, new Comparator<View>() {
             @Override
             public int compare(View o1, View o2) {
