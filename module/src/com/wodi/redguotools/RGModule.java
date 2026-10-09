@@ -92,6 +92,12 @@ public class RGModule extends XposedModule {
             log(Log.ERROR, TAG, "hookNoUpdate failed", t);
         }
         try {
+            SleepTimer.hook(this, appLoader);
+            log(Log.INFO, TAG, "hooked sleep timer -> screen off");
+        } catch (Throwable t) {
+            log(Log.ERROR, TAG, "hookSleepTimer failed", t);
+        }
+        try {
             hookViewAttach();
             log(Log.INFO, TAG, "hooked view-attach");
         } catch (Throwable t) {

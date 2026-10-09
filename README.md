@@ -40,7 +40,7 @@
 开启后，二级播放页**暂停**时把这些 alpha 还原成宿主原值（方便看清界面），恢复播放后重新套用。
 只影响透明度，不影响隐藏。暂停状态取自宿主 `TTVideoEngine.play()/pause()` 的调用事件。
 
-### 三、组件显隐（11 项）
+### 三、组件显隐（12 项）
 
 默认全部显示，勾选「隐藏」才生效；每项可单独调透明度。
 
@@ -64,6 +64,12 @@
 | 6 | 标题行（播放页 / 首页卡片） | `cls:...infoheader.ShortSeriesInfoHeaderView` / `id:g41` / `cls:...infolayer.ShortSeriesExtendTextView` |
 | 7 | 热评行 | `cls:...comment.view.InfoPanelHotCommentView` / `cls:...infopanel.hotcomment.SeriesHotCommentView` |
 | 8 | 底部信息 / 选集条 | `cls:...infobottom.ShortSeriesInfoBottomView` / `cls:...bottombar.view.BottomRelateSeriesView` / `id:hh` |
+| 9 | **底部进度条** | `id:i47` |
+
+> 进度条匹配的是它**外层容器**（`op4.h1`，1280×65）而不是 `SeekBar` 本身 ——
+> 拖动圆点是 SeekBar 的**兄弟节点**，只改 SeekBar 的话圆点不会跟着变淡。
+> 首页信息流卡片与二级播放页都生效（`HIT [slot]plprogress@…`）。
+> 注意它同样吃「全局透明度」这个系数：全局拉到 19% 时，进度条最高也只能到 19%。
 
 > 首页信息流里的视频卡片复用同一套 ShortSeries 组件，因此「播放页」那几项在首页卡片上同样生效。
 
@@ -122,19 +128,88 @@
 面板里带一行诊断信息，显示导航栏高度、当前可见状态、是否已被本模块接管，以及
 系统导航模式（手势 / 三键）。
 
-### 七、播放画质 / 倍速
+### 七、播放器：画质 / 倍速 / 定时关闭关屏
 
 | 功能 | 挂载点 |
 |------|--------|
 | 默认最高画质 | `TTVideoEngineImpl.configResolution(Resolution)` → 替换为 `ExtremelyHigh` |
-| 自定义倍速 1.0~4.0x 无级（0.1 步进） | `PlaybackParams.setSpeed(F)` |
-| 长按边缘临时倍速 1.0~4.0x（默认 2.0x） | 同上，按调用栈识别长按通路后改写 |
+| 自定义倍速 1.0~2.0x 无级（0.1 步进） | `PlaybackParams.setSpeed(F)` |
+| 长按边缘临时倍速 1.0~2.0x（默认 2.0x） | 同上，按调用栈识别长按通路后改写 |
+| **定时关闭到点直接熄屏** | `yr4.l.<init>`（宿主 `ScheduledStopPlayController` 的归零事件） |
 
-改动对**下一个起播的视频**生效（自动连播即可见效）。倍速不依赖宿主档位限位。
+改动对**下一个起播的视频**生效（自动连播即可见效）。
+
+**倍速上限 2.0x（v2.80 修正）**：常规倍速与长按倍速**是同一条通路**——
+两者最终都汇到 `PlaybackParams.setSpeed` → `TTPlayer._setFloatValue(0x3C)` 的 JNI
+（v2.79 全链路逆向定案）。native 引擎允许的档位只有 `{1.0, 1.25, 1.5, 2.0}`，
+超范围一律降档：用交替截帧差分实测，官方面板的 3.0x 三组meanDiff 42.5~47.1，
+与 1.5x 理论值 46.1 吻合，即**实际只有 ≈1.5x**，2.0x 才是真2.0x。
+
+因此 v2.80 起常规倍速也从「1.0~4.0x」收紧为 **1.0~2.0x**（`Config.speedCustom`
+读/写侧钳制，历史已存的大值自动压回）。此前 UI 承诺了引擎做不到的范围——与
+v2.42~2.68 长按侧犯的是同一个错。
 
 **长按倍速**：在画面边缘长按会临时提速，松手回到常规倍速。宿主把提速峰值**硬编码为 2.0x**，
 模块按调用来源识别出这条通路后把它改写成你设置的倍率；默认 2.0x 即等于宿主原行为。
 松手回落也会被改写成你的常规倍速（否则会被宿主的基准 1.0x 冲掉）。
+
+#### 定时关闭 → 直接关屏
+
+官方「定时关闭」（播放页更多菜单 / feed 长按菜单里的那一项）到点只做两件事：
+**停播** + `decorView.setKeepScreenOn(false)`。放开常亮之后屏幕并不会立刻黑，
+要等系统的息屏超时（实测小米 15 上是 60 秒；若开了「充电时保持唤醒」甚至一直不灭）。
+
+模块在**倒计时归零那一刻**用 root 注入一次电源键，直接熄屏。
+
+挂载点选的是 `yr4.l` 的构造函数：宿主到点时执行 `yr4.i.h.onNext(new yr4.l())`
+（日志 `count down ! stop play`），而全 APK 只有这一处 `new Lyr4/l;` ——
+挂在构造函数上就等于「定时关闭生效」这个事件，且不会在每秒 tick 上产生任何开销。
+
+> ⚠️ **需要 root —— 但只给 ReadGuo，红果保持无 root**
+>
+> 熄屏只有三条路：`PowerManager.goToSleep()`（需系统签名权限）、
+> `DevicePolicyManager.lockNow()`（需设备管理员）、注入电源键（需 `INJECT_EVENTS`），
+> 普通应用一个都拿不到，只能用 `su`。而 root 授权是**按调用方 uid** 判的 ——
+> 模块代码跑在红果进程里，直接 `su` 就等于要求给红果 root。
+>
+> 所以这里做成**两级**：
+>
+> 1. **宿主先自己 su 一次**（万一你哪天给红果也授了权，直接生效，不走下面）；
+> 2. 失败则把请求写成触发文件 `files/rg_guard/off.<时间戳>.req`，
+>    由 **ReadGuo 自己的 root 守护**用 inotify 收到后注入电源键 ——
+>    于是**只需要给 ReadGuo 授予 root**。
+>
+> **守护怎么装**（一次性，脚本随模块提供在 `module/assets/rg_guard/`）：
+>
+> ```bash
+> adb push module/assets/rg_guard/rg_screenoff.sh      /data/local/tmp/
+> adb push module/assets/rg_guard/rg_screenoff_hook.sh /data/local/tmp/
+> adb shell "su -c 'cp /data/local/tmp/rg_screenoff.sh /data/adb/service.d/; \
+>   cp /data/local/tmp/rg_screenoff_hook.sh /data/adb/; \
+>   chmod 755 /data/adb/service.d/rg_screenoff.sh /data/adb/rg_screenoff_hook.sh'"
+> ```
+>
+> KernelSU 开机时会执行 `/data/adb/service.d/*.sh`，守护随之启动（一个 inotify
+> 等待进程，闲置不轮询、不耗电）。**卸载**：删掉这两个文件 + 重启
+> （`rm /data/adb/service.d/rg_screenoff.sh /data/adb/rg_screenoff_hook.sh`）。
+>
+> 诊断：ReadGuo 侧写 `/data/local/tmp/rg_screenoff.log`；红果侧还是 `rgtools_log.txt`
+> （`sleep-timer: 已投递熄屏请求 -> rg_guard/off.xxx.req`）。
+>
+> **为什么不能直接跨进程调用**（2026-10-02 实测，四条通道全废）：Android 11+ 的
+> **包可见性**让红果看不见 ReadGuo —— `ContentResolver.call` 报 `Unknown authority`、
+> `bindService` 返回 false、显式广播投递不到、显式 `startActivity` 静默不起来。
+> 红果清单里既没有指向 ReadGuo 的 `<queries>` 也没有 `QUERY_ALL_PACKAGES`，
+> 而宿主 APK 改不了。让 ReadGuo 去匹配红果 `<queries>` 里已有的
+> `VIEW + BROWSABLE + https` 签名做「对等暴露」也无效。
+> 文件触发是唯一不需要改动系统的通道。
+>
+> 发键前守护会先看屏幕状态吗？—— 会：宿主在投递前已经查过
+> `PowerManager.isInteractive()`，屏幕黑着就不投递（电源键是**切换**键，
+> 盲发会把已熄屏的设备点亮）。
+
+> 只对**倒计时类**选项生效（「30 分钟后」/ 自定义时长）；「播完本剧」不走倒计时，
+> 因此不会触发熄屏。
 
 ### 八、手势
 
@@ -235,6 +310,7 @@ module/
 │   ├── RGModule.java           # Xposed 入口，所有 hook 注册
 │   ├── UiController.java       # 界面控制 / 规则引擎 / 清屏空闲收起
 │   ├── PlayerTweaks.java       # 播放器：最高画质 / 自定义倍速
+│   ├── SleepTimer.java         # 定时关闭到点直接熄屏（root 注入电源键）
 │   ├── Config.java             # 配置读写（槽位表 / 清单）
 │   ├── SettingsPanel.java      # 红果内设置面板
 │   ├── SheetEntry.java         # 播放设置弹层注入入口
@@ -242,6 +318,7 @@ module/
 │   ├── Theme.java              # 配色与控件工厂
 │   └── MainActivity.java       # 模块自身说明页
 ├── res/                        # 图标资源
+├── assets/rg_guard/            # 熄屏守护脚本（部署到 /data/adb，见「七、播放器」）
 ├── build.py                    # 免 Gradle 构建脚本
 └── AndroidManifest.xml
 ```
@@ -257,13 +334,64 @@ module/
 
 ## 更新日志
 
+### v2.75 (versionCode 75)
+
+此版本为一个小更新，没什么好更的，可以不更。
+
+- 新增底部细进度条透明度可调
+- 新增隐藏桌面图标（开启后桌面不显示图标；LSPosed 模块列表的「打开」不受影响，随时可进设置页恢复）
+- 主页右上角一键重启红果；主页新增「捐赠支持」入口
+- LSPosed「打开」入口改挂 `MODULE_SETTINGS` category：模块设置页与桌面图标彻底解耦
+- 版本号自 v2.74 之后重新计数，本次为 v2.75 (75)
+
+### v2.79 (versionCode 97)
+
+- **定案「2.0x 上限不可突破」并修正文案**。对当前版 7.3.9.32 全链路逆向
+  （`c65/c1 → V4 → p5 → r65/s → K4 → V2 → e65/f.setPlaySpeed → PlaybackParams.setSpeed →
+  TTVideoEngineImpl → TTPlayerClient.setFloatOption(60, speed) → TTPlayer._setFloatValue`）：
+  ① 官方选速面板与长按走**同一条通路**（v2.69 所述「官方独立内部通路」有误，已纠正）；
+  ② Java 层逐级验证均无钳制，限制在播放器引擎 native 层（`_setFloatValue` JNI）；
+  ③ **交替截帧差分实测：官方面板 3.0x 实际仅 ≈1.5x（三组 meanDiff 42.5~47.1，
+  与 1.5x 理论值 46.1 吻合），2.0x 为真实 2.0x**——官方 UI 的 3.0x 同样被引擎降档，
+  2.0x 即物理上限，任何 Java 层 hook 均无法突破。长按滑条维持 1.0~2.0x，
+  面板 hint 更新为实测结论。
+
+### v2.78 (versionCode 96)
+
+- **新增「底部进度条」透明度**（组件显隐第 9 项）。此前那条细进度条不在任何槽位里，
+  全局透明度拉到底它也不动。匹配的是进度条的**外层容器**（`id:i47`，1280×65）而不是
+  `SeekBar` 本身：拖动圆点是 `SeekBar` 的**兄弟节点**（同一父容器下的独立
+  `FrameLayout`），只改 `SeekBar` 的话圆点不会跟着变淡。
+  实机（7.3.9.32）：首页信息流与二级播放页均 `HIT [slot]plprogress -> op4.h1`；
+  槽位透明度设为 0 后视图树里该节点为 `alpha=0.0`。
+- **新增「定时关闭到点直接关屏」**。官方定时关闭只做「停播 + 放开屏幕常亮」，
+  屏幕要等系统息屏超时才黑（实测 60 秒；开了「充电时保持唤醒」甚至不灭）。
+  模块挂在宿主 `ScheduledStopPlayController` 的归零事件
+  （`yr4.l` 的构造函数，全 APK 唯一的 `new Lyr4/l;`，即日志里的
+  `count down ! stop play`）上，命中后**直接熄屏**；只对倒计时类选项生效，
+  「播完本剧」不走倒计时、不触发。
+- **熄屏的两级实现与 root 归属**：宿主先自己 `su` 一次，失败则把请求写成触发文件，
+  交给 **ReadGuo 自己的 root 守护**（inotify 事件驱动）执行 ——
+  **只需要给 ReadGuo 授予 root，红果保持无 root**。守护脚本在
+  `module/assets/rg_guard/`，安装/卸载见「七、播放器」章节。
+  实机验证：宿主日志 `sleep-timer: 已投递熄屏请求 -> rg_guard/off.xxx.req`，
+  守护日志 `screen off (n off.xxx.req)`，`mWakefulness: Awake → Dozing`。
+- 过程中实测确认了两件以后别再试的事：
+  1. **KernelSU（v3.2.5）只对白名单内的 uid 暴露 `su`** —— 未授权 uid 连
+     `ls /system/bin/su` 都是 No such file，exec 报 ENOENT。所以日志里
+     「找不到 su」= **没授权**，不是路径写错。
+  2. **Android 11+ 的包可见性会把「红果 → ReadGuo」的显式组件通道全部拦死**
+     （Provider / bindService / 显式广播 / 显式 Activity 四条都实测过），
+     因为这层限制按**调用方**的清单判，而宿主清单改不了。
+
 ### v2.69 (versionCode 87)
 
 - **修复「长按倍速设高于 2.0x 时不提速 / 长按完全不加速」**：
-  模块改写倍速所经的 `PlaybackParams.setSpeed` 参数链路被宿主播放器 **clamp 在 2.0x**
-  （截帧差分实测：改写 3.0x 的实际画面速度与 2.0x 完全相同，2.5x 行为异常），
-  改写值超过 2.0 全部无效。官方选速面板的 3.0x 档走的是另一条独立内部通路，
-  不经此参数链路，故不受限。v2.42~2.68 的「长按倍速 1.0~4.0x」滑条属于
+  模块改写倍速所经的 `PlaybackParams.setSpeed` 参数链路被宿主播放器引擎 **限制在 2.0x**
+  （截帧差分实测：改写 3.0x 的实际画面速度与 2.0x 相同，2.5x 行为异常），
+  改写值超过 2.0 全部无效。~~官方选速面板的 3.0x 档走的是另一条独立内部通路，
+  不经此参数链路~~（**v2.79 更正：官方选速与长按同一条通路，且官方 3.0x 实际也只有 ≈1.5x**）。
+  v2.42~2.68 的「长按倍速 1.0~4.0x」滑条属于
   UI 承诺了该链路做不到的范围。
 - 长按倍速取值域收紧为 **1.0~2.0x**（滑条、写入、读取三处同步钳制，
   历史配置中已存的更高值自动压回 2.0x），面板说明同步更新。
@@ -556,6 +684,22 @@ module/
 ### v2.10 (versionCode 28)
 
 - **修复**：「扫描当前组件」扫不出顶栏标签与右侧栏单按钮 → 记录块后继续下钻。
+
+## 第三方许可
+
+**本模块没有引入任何第三方库**，因此无需附带第三方许可证清单。
+
+具体说明：
+
+- 构建链为免 Gradle 的手写脚本（aapt2 / javac / d8 / zipalign / apksigner），
+  唯一编译期依赖是 libxposed 的 `api.jar`（**未内嵌、不再分发**，仅编译期引用）。
+- 界面全部由 framework 控件 + `Canvas` 现画（图标是代码里的 `Path`），
+  **不使用** Compose / Jetpack / miuix 等 UI 框架，也不含任何第三方素材或字体。
+- 唯一内嵌的二进制资源是模块自己的图标 `res/mipmap-*/ic_launcher.png` 与
+  `drawable/ic_launcher_foreground.xml`，均为本项目自绘。
+
+> v2.80 的界面观感参照了MIUI/HyperOS 的设计语言进行**手工实现**，
+> 未复制任何第三方项目的代码或素材。
 
 ## 免责声明
 

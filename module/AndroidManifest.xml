@@ -13,14 +13,39 @@
         android:label="ReadGuo"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <!--
+          MainActivity 挂 MODULE_SETTINGS（Xposed 官方约定 category）——
+          LSPosed 管理器模块列表的「打开」优先启动它（AppHelper.getSettingsIntent），
+          与桌面图标解耦，隐藏图标（禁 alias）后 LSPosed 入口依然可用。
+          本体永远保持 enabled。
+        -->
         <activity
             android:name="com.wodi.redguotools.MainActivity"
             android:exported="true"
-            android:label="ReadGuo">
+            android:label="ReadGuo"
+            android:excludeFromRecents="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="de.robv.android.xposed.category.MODULE_SETTINGS" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          桌面图标入口挂在 alias 上（LAUNCHER）。
+          「隐藏桌面图标」= 禁 alias：桌面无图标，但 MainActivity（MODULE_SETTINGS）
+          仍 enabled，LSPosed 的「打开」不受影响。
+        -->
+        <activity-alias
+            android:name="com.wodi.redguotools.LauncherAlias"
+            android:targetActivity="com.wodi.redguotools.MainActivity"
+            android:enabled="true"
+            android:exported="true"
+            android:label="ReadGuo"
+            android:icon="@mipmap/ic_launcher">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity>
+        </activity-alias>
     </application>
 </manifest>

@@ -9,6 +9,8 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
+import sys
 import zipfile
 
 ROOT = r"D:\CEBIANLAN\File\RedGuo"
@@ -28,11 +30,12 @@ API_JAR = os.path.join(TOOLS, "aar_x", "classes.jar")
 JAVA_HOME = r"C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
 JAVAC = os.path.join(JAVA_HOME, "bin", "javac.exe")
 KEYTOOL = os.path.join(JAVA_HOME, "bin", "keytool.exe")
+JAVA = os.path.join(JAVA_HOME, "bin", "java.exe")
 
 MIN_SDK = "29"
 TARGET_SDK = "35"
-VERSION_CODE = "92"
-VERSION_NAME = "2.74"
+VERSION_CODE = "75"
+VERSION_NAME = "2.75"
 
 
 def run(cmd, cwd=None, check=True):
@@ -57,6 +60,9 @@ def tool(name):
         if os.path.isfile(p):
             return p
     raise SystemExit("tool not found: " + name)
+
+
+
 
 
 def main():
@@ -85,6 +91,9 @@ def main():
         run([tool("aapt2"), "compile", "--dir", res_dir, "-o", res_zip])
 
     # 1b) aapt2 link
+    #注意位置参数的**顺序即优先级，靠后的覆盖靠前的**：
+    # 模块自己的 res 必须放在 AAR 资源**之后**，否则 mipmap/ic_launcher
+    # 会被 AAR 里的同名资源顶掉（实测报 "resource mipmap/ic_launcher not found"）。
     unaligned = os.path.join(TMP, "unaligned.apk")
     link = [tool("aapt2"), "link",
             "-o", unaligned,
@@ -95,6 +104,7 @@ def main():
             "--version-code", VERSION_CODE,
             "--version-name", VERSION_NAME,
             "--auto-add-overlay"]
+    # v2.83 回到纯 Java 界面（放弃 v2.82 的 miuix/Compose），不再需要 AAR 资源。
     if res_zip:
         link.append(res_zip)
     run(link)
@@ -121,13 +131,22 @@ def main():
         for f in files:
             if f.endswith(".class"):
                 class_files.append(os.path.join(base, f))
-    print("classes:", len(class_files))
+    print("javac classes:", len(class_files))
+    # Windows 命令行有 8191 字符上限，class 一多就会「命令行太长」。
+    # d8 支持 @argfile（每行一个路径），统一走文件传参。
+    argfile = os.path.join(TMP, "d8_args.txt")
+    with open(argfile, "w", encoding="utf-8") as fh:
+        for f in class_files:
+            fh.write(f + "\n")
     run([tool("d8"), "--lib", ANDROID_JAR, "--min-api", MIN_SDK,
-         "--output", dex_dir] + class_files)
+         "--output", dex_dir, "@" + argfile])
 
     # 4) 把 dex / assets / META-INF 塞进 apk
+    dex_files = sorted(f for f in os.listdir(dex_dir) if f.endswith(".dex"))
+    print("dex:", [(f, os.path.getsize(os.path.join(dex_dir, f))) for f in dex_files])
     with zipfile.ZipFile(unaligned, "a", zipfile.ZIP_DEFLATED) as z:
-        z.write(os.path.join(dex_dir, "classes.dex"), "classes.dex")
+        for f in dex_files:      # 超过 64K 类会产出 classes2.dex…，要全部塞进去
+            z.write(os.path.join(dex_dir, f), f)
         assets = os.path.join(MOD, "assets")
         for base, _dirs, files in os.walk(assets):
             for f in files:

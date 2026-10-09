@@ -352,7 +352,7 @@ public final class SettingsPanel {
                 });
         divider(a, p, card);
 
-        // 组件显隐：11 个子项，折叠 + 摘要
+        // 组件显隐：12 个子项，折叠 + 摘要
         Expander ex = expander(a, p, card, "slots", "组件显隐",
                 slotsSummary(a), true);
         TextView slotsHint = Theme.hint(a, p,
@@ -439,7 +439,7 @@ public final class SettingsPanel {
         final TextView speedLabel = blockLabelRow(a, p, ex.body,
                 "常规倍速", (Config.speedCustom(a) / 10f) + "x");
         SeekBar sbSpeed = new SeekBar(a);
-        sbSpeed.setMax(30);   // 10~40 => 1.0x~4.0x
+        sbSpeed.setMax(10);   // 10~20 => 1.0x~2.0x（引擎对速率的硬上限，同长按）
         sbSpeed.setProgress(Config.speedCustom(a) - 10);
         Theme.styleSeekBar(p, sbSpeed);
         sbSpeed.setOnSeekBarChangeListener(new SimpleSeek() {
@@ -455,6 +455,11 @@ public final class SettingsPanel {
             }
         });
         ex.body.addView(sbSpeed);
+        TextView speedHint = Theme.hint(a, p,
+                "上限 2.0x：常规与长按是同一条播放器通路，native 引擎把超过 2.0 的请求降档——"
+                        + "实测官方面板的 3.0x 实际只有约 1.5x，2.0x 已是真实上限。");
+        speedHint.setPadding(0, 0, 0, Theme.dp(a, 6));
+        ex.body.addView(speedHint);
 
         final TextView pressLabel = blockLabelRow(a, p, ex.body,
                 "长按倍速", (Config.pressSpeedCustom(a) / 10f) + "x");
@@ -476,7 +481,7 @@ public final class SettingsPanel {
         });
         ex.body.addView(sbPress);
         TextView pressHint = Theme.hint(a, p,
-                "在画面边缘长按临时提速到该倍率，松手恢复常规倍速。上限 2.0x：宿主播放器会丢弃超过 2.0 的提速值（设更高时长按不会加速）。");
+                "在画面边缘长按临时提速到该倍率，松手恢复常规倍速。上限 2.0x：播放器引擎（native）把超过 2.0 的请求降档——实测官方面板的 3.0x 也只有约 1.5x，2.0x 已是真实上限。");
         pressHint.setPadding(0, 0, 0, Theme.dp(a, 6));
         ex.body.addView(pressHint);
 

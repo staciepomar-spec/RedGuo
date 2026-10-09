@@ -25,13 +25,13 @@ public final class Config {
     /**
      * 槽位的顺序即面板里的显示顺序。
      *
-     * <p>前 3 项 + 末项是首页（MainFragmentActivity）的浮层，中间 5 项是二级界面
+     * <p>前 3 项 + 末 3 项是首页（MainFragmentActivity）的浮层，中间 6 项是二级界面
      * （ShortSeriesActivity，即短剧播放页）的浮层。注意首页信息流里的视频卡片
      * 用的是同一套 ShortSeries 组件，所以「播放页」那几项在首页卡片上同样生效。
      */
     public static final String[] SLOT_KEYS = {
             "top", "right", "bottom",
-            "plbar", "pldanmaku", "plheader", "plhot", "plbottom",
+            "plbar", "pldanmaku", "plheader", "plhot", "plbottom", "plprogress",
             "feedfull", "feedrec", "feedtag",
     };
 
@@ -44,6 +44,7 @@ public final class Config {
             "标题行（播放页 / 首页卡片）",
             "热评行（播放页）",
             "底部信息/选集条（播放页）",
+            "底部进度条（播放页）",
             "全屏观看按钮（首页卡片）",
             "备案号水印（首页卡片）",
             "类型标签（剧名下方）",
@@ -85,6 +86,12 @@ public final class Config {
             {"cls:com.dragon.read.component.shortvideo.impl.infobottom.ShortSeriesInfoBottomView",
              "cls:com.dragon.read.component.shortvideo.impl.bottombar.view.BottomRelateSeriesView",
              "id:hh"},
+            // 播放页屏幕最下方那条细进度条（含拖动圆点）：
+            // 外层 op4.h1（id=i47，1280x65）> FrameLayout(hw9) > SeriesProhibitVerticalScrollSeekBar。
+            // 用容器 id 而不是 SeekBar 类名 —— 圆点(c6)是 SeekBar 的**兄弟节点**，
+            // 只改 SeekBar 的话圆点不会跟着变淡，容器才是「整条进度条」。
+            // （清屏空闲收起里也一直在用同一个 id:i47 定位这条进度条。）
+            {"id:i47"},
             // 首页卡片上那枚「全屏观看」浮起按钮（图标 + 文字，可点击祖先由 text: 规则回捞）
             {"text:全屏观看"},
             // 视频画面右上角的「（番茄）网微剧备字（2026）第N号」备案号水印。
@@ -340,18 +347,21 @@ public final class Config {
     }
 
     /**
-     * 自定义倍速值 ×10（10~40 = 1.0~4.0 倍）。
+     * 常规播放速率值 ×10（10~20 = 1.0~2.0 倍）。
      *
-     * <p>这是「常规播放速率」。PlayerTweaks 通过**调用栈**区分「用户选速」与
-     * 「边缘长按临时倍速」（见 {@code PlayerTweaks.isTemporarySpeed()}），
-     * 不再依赖数值比较，所以本值的取值域可以自由调整。
+     * <p>本值 v2.30~v2.79 允许到 4.0x，是<b>错的</b>：常规通路与长按通路最终
+     * 都汇到 {@code PlaybackParams.setSpeed} → TTPlayer 的 JNI（v2.79 全链路
+     * 逆向 + 交替截帧差分定案），引擎对速率有2.0x 硬上限，超过一律降档 ——
+     * 官方面板的 3.0x 实测也只有 ≈1.5x。
+     *
+     * <p>v2.80 起与长按倍速统一钳到 2.0x；读取侧钳制兼容历史已存的大值。
      */
     public static int speedCustom(Context c) {
-        return getInt(c, "speed_x10", 20);
+        return Math.max(10, Math.min(20, getInt(c, "speed_x10", 20)));
     }
 
     public static void setSpeedCustom(Context c, int v) {
-        setInt(c, "speed_x10", Math.max(10, Math.min(40, v)));
+        setInt(c, "speed_x10", Math.max(10, Math.min(20, v)));
     }
 
     /**

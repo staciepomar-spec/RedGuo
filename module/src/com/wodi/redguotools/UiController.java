@@ -248,6 +248,14 @@ public final class UiController {
         if (us != null) {
             logFile("no-update install: " + us);
         }
+        String ss = SleepTimer.status();
+        if (ss != null) {
+            logFile("sleep-timer install: " + ss);
+        }
+        try {
+            SleepTimer.ensureGuardDir(a.getApplicationContext());
+        } catch (Throwable ignored) {
+        }
         resetLogFile(a);
         logFile("activity created: " + a.getClass().getName());
         View decor = a.getWindow().getDecorView();
