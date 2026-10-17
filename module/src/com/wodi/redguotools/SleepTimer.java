@@ -64,7 +64,11 @@ final class SleepTimer {
 
     /** 倒计时归零标记类（构造一次 = 定时关闭生效一次）。 */
     private static final String[] EVENT_CLASSES = {
+            // 改版 com.phoenix.read（7.3.9.32）
             "yr4.l",
+            // Play 版 com.phoenix.read.oversea.gp（同版本，混淆短名不同；
+            // 其控制器为 vm4.i，tag 同为 ScheduledStopPlayController）
+            "vm4.l",
     };
 
     /**

@@ -1,6 +1,7 @@
 package com.wodi.redguotools;
 
 import android.app.Activity;
+import android.content.Context;
 import android.app.Dialog;
 import android.content.ComponentName;
 import android.content.Intent;
@@ -52,9 +53,43 @@ public class MainActivity extends Activity {
     private static final String AUTHOR = "酷安@残話";
     private static final String GITHUB = "github.com/staciepomar-spec/RedGuo";
 
-    /** 模块日志落在宿主的外置私有目录下，模块进程要读得靠 root。 */
-    private static final String HOST_LOG_DIR =
-            "/sdcard/Android/data/com.phoenix.read/files";
+    /**
+     * 宿主日志目录。三个渠道包名不同（改版 / Play 版 / 官方），
+     * 这里按「哪个包真的产出过 rgtools_log.txt」来判定当前在用的宿主。
+     * 目录读取本身要 root（模块进程读不到别的 App 的 Android/data）。
+     */
+    private static String mHostPkg;
+
+    static String hostPkgResolved(Context c) {
+        if (mHostPkg != null) {
+            return mHostPkg;
+        }
+        for (String p : Hosts.PKGS) {
+            RootShell.Result r = RootShell.run(
+                    "test -f '/sdcard/Android/data/" + p + "/files/rgtools_log.txt' && echo Y");
+            if (r.ok() && r.out != null && r.out.contains("Y")) {
+                mHostPkg = p;
+                return mHostPkg;
+            }
+        }
+        for (String p : Hosts.PKGS) {
+            try {
+                if (c == null) {
+                    continue;
+                }
+                c.getPackageManager().getPackageInfo(p, 0);
+                mHostPkg = p;
+                return mHostPkg;
+            } catch (Throwable ignored) {
+            }
+        }
+        mHostPkg = Hosts.DEFAULT;
+        return mHostPkg;
+    }
+
+    static String hostLogDir(Context c) {
+        return "/sdcard/Android/data/" + hostPkgResolved(c) + "/files";
+    }
 
     /** 桌面图标的 LAUNCHER 载体（alias）。隐藏图标 = 禁 alias；MainActivity 本体
      *  挂 MODULE_SETTINGS category（LSPosed「打开」入口），永远保持 enabled。 */
@@ -140,14 +175,14 @@ public class MainActivity extends Activity {
 
     /* ==================== 骨架 ==================== */
 
-    /** 页面外壳：大标题 + 可选右上角动作按钮 + 滚动内容列。 */
+    /** 页面外壳：Large Title + 可选右上角动作按钮 + 滚动内容列。 */
     private LinearLayout page(String title, int rightIcon, Runnable rightAction) {
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
 
         FrameLayout bar = new FrameLayout(this);
-        int h = dp(56);
-        bar.setPadding(dp(20), dp(6), dp(16), 0);
+        int h = dp(64);
+        bar.setPadding(dp(16), dp(4), dp(8), dp(4));
         col.addView(bar, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, h));
 
@@ -158,7 +193,7 @@ public class MainActivity extends Activity {
 
         if (rightIcon >= 0) {
             FrameLayout btn = new FrameLayout(this);
-            btn.setBackground(MiUi.pressable(this, p, 14));
+            btn.setBackground(MiUi.pressable(this, p, 22));
             MiUi.Icon ic = new MiUi.Icon(this);
             ic.setType(rightIcon);
             ic.setColor(p.title);
@@ -167,6 +202,7 @@ public class MainActivity extends Activity {
             btn.addView(ic, icLp);
             FrameLayout.LayoutParams bLp = new FrameLayout.LayoutParams(dp(44), dp(44));
             bLp.gravity = Gravity.END | Gravity.CENTER_VERTICAL;
+            bLp.rightMargin = dp(4);
             bar.addView(btn, bLp);
             final Runnable act = rightAction;
             btn.setOnClickListener(new View.OnClickListener() {
@@ -182,12 +218,13 @@ public class MainActivity extends Activity {
         ScrollView sv = new ScrollView(this);
         sv.setFillViewport(true);
         sv.setClipToPadding(false);
+        sv.setOverScrollMode(View.OVER_SCROLL_ALWAYS);
         col.addView(sv, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
         LinearLayout body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
-        body.setPadding(dp(16), dp(4), dp(16), dp(24));
+        body.setPadding(dp(16), 0, dp(16), dp(28));
         sv.addView(body, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         holder.put(col, body);
@@ -197,14 +234,14 @@ public class MainActivity extends Activity {
     /** 页面外壳 → 该页的滚动内容列（构建页时记下，方便调用方往里塞卡片）。 */
     private final java.util.Map<View, View> holder = new java.util.HashMap<>();
 
-    /** 普通底栏：整条贴底 + 顶部分割线，四个图标 + 文字，选中项只做颜色高亮（无衬底不悬浮）。 */
+    /** iOS 底部标签栏：白底 + 顶部 1px 分割线，选中项只做蓝色高亮。 */
     private View bottomBar() {
         FrameLayout wrap = new FrameLayout(this);
 
         View line = new View(this);
-        line.setBackgroundColor(p.navSelBg);
+        line.setBackgroundColor(p.divider);
         wrap.addView(line, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
+                ViewGroup.LayoutParams.MATCH_PARENT, MiUi.hairline(this)));
 
         LinearLayout bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
@@ -212,9 +249,8 @@ public class MainActivity extends Activity {
         bar.setBackgroundColor(p.card);
         FrameLayout.LayoutParams blp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        blp.topMargin = dp(1);
-        blp.bottomMargin = dp(0);
-        bar.setPadding(0, dp(6), 0, dp(6));
+        blp.topMargin = MiUi.hairline(this);
+        bar.setPadding(0, dp(6), 0, dp(4));
         wrap.addView(bar, blp);
 
         String[] names = {"主页", "功能", "设置", "关于"};
@@ -222,8 +258,6 @@ public class MainActivity extends Activity {
         mTabs = new View[names.length];
         for (int i = 0; i < names.length; i++) {
             final int idx = i;
-            // 外层均分整格做点击区，内层只按内容宽度撑开—— 衬底要贴着图标+文字，
-            // 直接把衬底铺在均分格上会显得又宽又挤（v2.80 初版就是这样）。
             FrameLayout cell = new FrameLayout(this);
             cell.setOnClickListener(new View.OnClickListener() {
                 @Override
@@ -235,18 +269,19 @@ public class MainActivity extends Activity {
             LinearLayout item = new LinearLayout(this);
             item.setOrientation(LinearLayout.VERTICAL);
             item.setGravity(Gravity.CENTER);
-            item.setPadding(0, dp(8), 0, dp(8));
+            item.setPadding(0, dp(2), 0, dp(2));
 
             MiUi.Icon ic = new MiUi.Icon(this);
             ic.setType(icons[i]);
             ic.setColor(p.sub);
-            item.addView(ic, new LinearLayout.LayoutParams(dp(22), dp(22)));
+            item.addView(ic, new LinearLayout.LayoutParams(dp(24), dp(24)));
 
             TextView label = new TextView(this);
             label.setText(names[i]);
-            label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+            label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
             label.setTextColor(p.sub);
             label.setGravity(Gravity.CENTER);
+            label.setIncludeFontPadding(false);
             label.setPadding(0, dp(3), 0, 0);
             item.addView(label);
 
@@ -295,85 +330,152 @@ public class MainActivity extends Activity {
         return col;
     }
 
-    /** 右上角按钮：强制停止红果并重新拉起（需 root；无 root 时退化为仅强停）。 */
+    /**
+     * 右上角按钮：强制停止红果并重新拉起（需 root；无 root 时退化为仅强停）。
+     *
+     * <p>三个渠道包名可能同时装在同一台机器上（改版 / Play 版 / 官方），
+     * 全部停掉以免残留进程占用；只重新拉起**当前在用**的那个
+     * （判定见 {@link #hostPkgResolved(a)}）。
+     */
     private void restartHost() {
-        RootShell.run("am force-stop com.phoenix.read");
-        RootShell.run("monkey -p com.phoenix.read -c android.intent.category.LAUNCHER 1");
-        toast("已重启红果");
+        restartHostFrom(this);
+    }
+
+    /**
+     * 强制停止红果并重新拉起（需 root；无 root 时退化为仅强停）。
+     *
+     * <p>做成静态是为了给模块内的设置页复用 —— 配置改完点一下就能重启，
+     * 不用切回主页。
+     */
+    static void restartHostFrom(final Activity a) {
+        if (a == null) {
+            return;
+        }
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                String primary = hostPkgResolved(a);
+                int n = 0;
+                for (String p : Hosts.PKGS) {
+                    try {
+                        a.getPackageManager().getPackageInfo(p, 0);
+                    } catch (Throwable ignored) {
+                        continue;   // 没装就跳过
+                    }
+                    RootShell.run("am force-stop " + p);
+                    n++;
+                }
+                final String msg;
+                if (n == 0) {
+                    msg = "未找到已安装的红果";
+                } else {
+                    RootShell.run("monkey -p " + primary
+                            + " -c android.intent.category.LAUNCHER 1");
+                    msg = "已重启红果（" + primary + "）";
+                }
+                a.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        android.widget.Toast.makeText(a, msg,
+                                android.widget.Toast.LENGTH_SHORT).show();
+                    }
+                });
+            }
+        }, "rg-restart").start();
     }
 
     private void buildHome(LinearLayout body) {
-        /* 激活卡：绿底 + 右侧大圆环对勾 */
-        FrameLayout card = new FrameLayout(this);
-        card.setBackground(MiUi.round(p.greenSoft, 18, this));
-        int pad = dp(18);
-        card.setPadding(pad, pad, pad, pad);
-
-        LinearLayout vcol = new LinearLayout(this);
-        vcol.setOrientation(LinearLayout.VERTICAL);
-        TextView st = new TextView(this);
-        st.setText("模块已激活");
-        st.setTextColor(p.title);
-        st.setTextSize(TypedValue.COMPLEX_UNIT_SP, 21);
-        st.setTypeface(null, Typeface.BOLD);
-        vcol.addView(st);
-
-        TextView ver = new TextView(this);
-        ver.setText("v" + versionName());
-        ver.setTextColor(p.sub);
-        ver.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        ver.setPadding(0, dp(3), 0, 0);
-        vcol.addView(ver);
-
-        TextView name = new TextView(this);
-        name.setText("ReadGuo");
-        name.setTextColor(p.title);
-        name.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        name.setTypeface(null, Typeface.BOLD);
-        name.setPadding(0, dp(10), 0, 0);
-        vcol.addView(name);
-        card.addView(vcol);
-
-        MiUi.Icon ring = new MiUi.Icon(this);
-        ring.setType(MiUi.I_RING_CHECK);
-        ring.setColor(p.green);
-        FrameLayout.LayoutParams rlp = new FrameLayout.LayoutParams(dp(58), dp(58));
-        rlp.gravity = Gravity.END | Gravity.CENTER_VERTICAL;
-        rlp.rightMargin = dp(-10);
-        card.addView(ring, rlp);
-
-        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        clp.bottomMargin = dp(12);
-        body.addView(card, clp);
-
-        /* 设备信息卡 */
-        LinearLayout dev = MiUi.card(this, p, body);
-        infoRow(dev, "设备名称", Build.MODEL);
-        infoRow(dev, "设备型号", Build.MANUFACTURER + " " + Build.DEVICE);
-        infoRow(dev, "HyperOS 版本", hyperOsVersion());
-        infoRow(dev, "Android 版本", Build.VERSION.RELEASE + "（SDK " + Build.VERSION.SDK_INT + "）");
-        infoRow(dev, "红果版本", hostVersion());
-        infoRow(dev, "模块版本", versionName() + "（" + versionCode() + "）");
-
-        /* 捐赠支持 */
-        LinearLayout open = MiUi.card(this, p, body);
-        LinearLayout line = MiUi.row(this, p, open, "捐赠支持", "模块免费，请作者喝杯咖啡", MiUi.I_HEART);
-        // 爱心固定红色，不随主题灰
-        for (int i = 0; i < line.getChildCount(); i++) {
-            View ch = line.getChildAt(i);
-            if (ch instanceof MiUi.Icon) {
-                ((MiUi.Icon) ch).setColor(0xFFFF4D67);
+        /* ---------- 状态（按证据显示，不做断言） ---------- */
+        LinearLayout st = MiUi.group(this, p, body, "状态");
+        ModuleState.Result detected = ModuleState.detect(this);
+        int state = detected.state;
+        String detail = detected.detail;
+        String title;
+        String note;
+        int icon;
+        switch (state) {
+            case ModuleState.RUNNING:
+                title = "模块正在红果中运行";
+                note = detail;
+                icon = MiUi.I_RING_CHECK;
                 break;
-            }
+            case ModuleState.IDLE:
+                title = "上次在红果里运行过";
+                note = detail + "。打开一次红果即可恢复。";
+                icon = MiUi.I_RING_CHECK;
+                break;
+            case ModuleState.NONE:
+                title = "没有运行记录";
+                note = "红果里找不到本模块的日志。通常是没在 LSPosed 中启用本模块、"
+                        + "或作用域没勾选红果免费短剧。";
+                icon = MiUi.I_INFO;
+                break;
+            default:
+                title = "无法检测运行状态";
+                note = "本机没有 root，读不到红果的运行日志，所以这里不做断言。"
+                        + "请在 LSPosed 中确认模块已启用、且作用域勾选了红果免费短剧。";
+                icon = MiUi.I_INFO;
+                break;
         }
-        line.addView(MiUi.chevron(this, p));
-        line.setOnClickListener(new View.OnClickListener() {
+        LinearLayout line = MiUi.row(this, p, st, title, null, icon);
+        line.addView(MiUi.value(this, p, "v" + versionName()));
+        TextView stateNote = MiUi.body(this, p, note);
+        stateNote.setPadding(MiUi.dp(this, 16), MiUi.dp(this, 2), MiUi.dp(this, 16), MiUi.dp(this, 14));
+        st.addView(stateNote);
+
+        /* ---------- 设备 ---------- */
+        LinearLayout dev = MiUi.group(this, p, body, "设备与版本");
+        valueRow(dev, "设备", Build.MODEL);
+        MiUi.divider(this, p, dev);
+        valueRow(dev, "型号", Build.MANUFACTURER + " " + Build.DEVICE);
+        MiUi.divider(this, p, dev);
+        valueRow(dev, "系统", hyperOsVersion());
+        MiUi.divider(this, p, dev);
+        valueRow(dev, "Android", Build.VERSION.RELEASE);
+        MiUi.divider(this, p, dev);
+        valueRow(dev, "红果版本", hostVersion());
+        MiUi.divider(this, p, dev);
+        valueRow(dev, "模块版本", versionName() + " (" + versionCode() + ")");
+
+        /* ---------- 支持 ---------- */
+        LinearLayout open = MiUi.group(this, p, body, null);
+        LinearLayout dl = MiUi.row(this, p, open, "捐赠支持", null, MiUi.I_HEART);
+        dl.addView(MiUi.chevron(this, p));
+        dl.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 showDonate();
             }
         });
+    }
+
+    /**
+     * iOS 标准 label / value 行：左标签、右取值（灰色、单行、过长截断）。
+     * 不加图标 —— 设备信息这类纯文本项在原生设置里本来就没有图标列，
+     * 强行加图标反而会让整页密度失衡。
+     */
+    private void valueRow(LinearLayout card, String label, String value) {
+        LinearLayout line = new LinearLayout(this);
+        line.setOrientation(LinearLayout.HORIZONTAL);
+        line.setGravity(Gravity.CENTER_VERTICAL);
+        line.setMinimumHeight(dp(52));
+        line.setPadding(dp(16), 0, dp(16), 0);
+
+        TextView l = MiUi.rowTitle(this, p, label);
+        line.addView(l, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView v = MiUi.value(this, p, value);
+        v.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        v.setMaxLines(1);
+        v.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams vlp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        vlp.leftMargin = dp(12);
+        line.addView(v, vlp);
+
+        card.addView(line, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
     }
 
     /** 捐赠弹窗：支付宝 / 微信收款码（assets 内置图），纵向可滚。 */
@@ -385,7 +487,7 @@ public class MainActivity extends Activity {
         col.setGravity(Gravity.CENTER_HORIZONTAL);
         int pad = dp(18);
         col.setPadding(pad, pad, pad, pad);
-        col.setBackground(MiUi.round(p.card, 18, this));
+        col.setBackground(MiUi.round(p.card, 16, this));
 
         TextView tip = new TextView(this);
         tip.setText("扫码请作者喝杯咖啡");
@@ -447,24 +549,6 @@ public class MainActivity extends Activity {
         dlg.show();
     }
 
-    /** 卡片内「标题 / 取值」两行，取值用灰色。 */
-    private void infoRow(LinearLayout card, String label, String value) {
-        TextView l = new TextView(this);
-        l.setText(label);
-        l.setTextColor(p.title);
-        l.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
-        l.setTypeface(null, Typeface.BOLD);
-        l.setPadding(0, dp(10), 0, dp(2));
-        card.addView(l);
-
-        TextView v = new TextView(this);
-        v.setText(value);
-        v.setTextColor(p.sub);
-        v.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        v.setPadding(0, 0, 0, dp(8));
-        card.addView(v);
-    }
-
     /* ==================== 功能页 ==================== */
 
     private View featurePage() {
@@ -477,7 +561,7 @@ public class MainActivity extends Activity {
                 "自定义隐藏清单：「扫描当前页面」自动列出，或手动加规则（cls: / @文案 / text: / id:）",
                 "底部标签栏：按标签文字勾选隐藏，剩余标签自动摊满整行",
                 "底部导航栏：软件内全程隐藏小白条，退出软件才恢复",
-                "叠加透明度：全局系数 × 各项独立，双层叠加");
+                "界面透明度：首页/二级页上视频以外的所有浮层统一调透明，设置持久保存，只有重置才还原");
 
         featureCard(body, "播放器",
                 "默认最高画质：起播自动选最高可用档",
@@ -498,18 +582,20 @@ public class MainActivity extends Activity {
         return col;
     }
 
-    /** 一张卡：标题 + 若干条要点。 */
+    /** 一个分组：分组标题（卡外）+ 白卡，卡内每条要点一行，行间一条缩进分割线。 */
     private void featureCard(LinearLayout body, String title, String... points) {
-        LinearLayout card = MiUi.card(this, p, body);
-        TextView t = MiUi.groupLabel(this, p, title);
-        t.setTextColor(p.title);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        t.setTypeface(null, Typeface.BOLD);
-        t.setPadding(0, dp(8), 0, dp(2));
-        card.addView(t);
-        for (String s : points) {
-            TextView v = MiUi.rowSub(this, p, "· " + s);
-            v.setPadding(0, dp(3), 0, dp(3));
+        LinearLayout card = MiUi.group(this, p, body, title);
+        for (int i = 0; i < points.length; i++) {
+            if (i > 0) {
+                MiUi.divider(this, p, card);
+            }
+            TextView v = new TextView(this);
+            v.setText(points[i]);
+            v.setTextColor(p.title);
+            v.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+            v.setLineSpacing(dp(3), 1f);
+            v.setIncludeFontPadding(false);
+            v.setPadding(dp(16), dp(13), dp(16), dp(13));
             card.addView(v);
         }
     }
@@ -519,87 +605,27 @@ public class MainActivity extends Activity {
     private View settingsPage() {
         LinearLayout col = page("设置", -1, null);
         LinearLayout body = (LinearLayout) holder.get(col);
-
-        /* --- 外观与启动 --- */
-        LinearLayout card1 = MiUi.card(this, p, body);
-        switchRow(card1, "隐藏桌面图标",
-                "关闭后从 LSPosed 模块列表的「打开」进入",
-                iconHidden(), new MiUi.OnToggle() {
-            @Override
-            public void onChanged(boolean on) {
-                applyIconHidden(on);
-                // 「恢复桌面图标」那行的状态文案要跟着变，重建本页同步
-                refreshSettings();
-            }
-        });
-
-        /* --- 日志 --- */
-        LinearLayout card2 = MiUi.card(this, p, body);
-        TextView logTitle = MiUi.groupLabel(this, p, "日志");
-        logTitle.setTextColor(p.title);
-        logTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        logTitle.setTypeface(null, Typeface.BOLD);
-        logTitle.setPadding(0, dp(8), 0, 0);
-        card2.addView(logTitle);
-
-        LinearLayout l1 = MiUi.row(this, p, card2, "运行日志", logDesc("rgtools_log.txt"), MiUi.I_LOG);
-        l1.addView(MiUi.chevron(this, p));
-        l1.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                showLog("rgtools_log.txt");
-            }
-        });
-
-        LinearLayout l2 = MiUi.row(this, p, card2, "视图树快照", logDesc("rgtools_tree.txt"), MiUi.I_BOOK);
-        l2.addView(MiUi.chevron(this, p));
-        l2.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                showLog("rgtools_tree.txt");
-            }
-        });
-
-        LinearLayout restore = MiUi.row(this, p, card2, "恢复桌面图标",
-                iconHidden() ? "当前已隐藏，点此恢复" : "当前未隐藏", MiUi.I_APPS);
-        restore.addView(MiUi.chevron(this, p));
-        restore.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                if (!iconHidden()) {
-                    toast("桌面图标本来就是显示的");
-                    return;
-                }
-                applyIconHidden(false);
-                toast("已恢复桌面图标");
-                refreshSettings();
-            }
-        });
-
-        TextView pathHint = MiUi.rowSub(this, p,
-                "日志与快照写在红果的外置私有目录（" + HOST_LOG_DIR + "/）。"
-                        + "Android 11 起应用读不到别的 App 的私有目录，所以本模块用 root 读取；"
-                        + "没给 ReadGuo 授权 root 时可用 adb 拉取。");
-        pathHint.setPadding(dp(4), dp(4), dp(4), dp(8));
-        card2.addView(pathHint);
-
+        ModuleSettings.build(this, p, body);
         return col;
     }
 
-    /** 卡片内一行开关：标题 + 副标题 + 右侧 MIUI 开关。 */
+    /** 卡片内一行开关：标题 + 副标题 + 右侧开关（行高与普通列表行一致）。 */
     private void switchRow(LinearLayout card, String title, String sub, boolean on,
                            final MiUi.OnToggle l) {
         LinearLayout line = new LinearLayout(this);
         line.setOrientation(LinearLayout.HORIZONTAL);
         line.setGravity(Gravity.CENTER_VERTICAL);
-        line.setMinimumHeight(dp(56));
-        line.setPadding(0, dp(10), 0, dp(10));
+        line.setMinimumHeight(dp(sub == null || sub.isEmpty() ? 52 : 62));
+        line.setPadding(dp(16), 0, dp(16), 0);
 
         LinearLayout texts = new LinearLayout(this);
         texts.setOrientation(LinearLayout.VERTICAL);
+        texts.setGravity(Gravity.CENTER_VERTICAL);
         texts.addView(MiUi.rowTitle(this, p, title));
         if (sub != null && !sub.isEmpty()) {
-            texts.addView(MiUi.rowSub(this, p, sub));
+            TextView s = MiUi.rowSub(this, p, sub);
+            s.setPadding(0, dp(2), 0, 0);
+            texts.addView(s);
         }
         line.addView(texts, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
@@ -690,7 +716,7 @@ public class MainActivity extends Activity {
         final Dialog dlg = new Dialog(this);
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
-        col.setBackground(MiUi.round(p.card, 18, this));
+        col.setBackground(MiUi.round(p.card, 16, this));
 
         TextView title = new TextView(this);
         title.setText(name);
@@ -701,7 +727,7 @@ public class MainActivity extends Activity {
         col.addView(title);
 
         TextView sub = new TextView(this);
-        sub.setText(HOST_LOG_DIR + "/" + name);
+        sub.setText(hostLogDir(this) + "/" + name);
         sub.setTextColor(p.hint);
         sub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
         sub.setPadding(dp(18), 0, dp(18), dp(8));
@@ -791,7 +817,7 @@ public class MainActivity extends Activity {
     }
 
     private String readTail(String name) {
-        String path = HOST_LOG_DIR + "/" + name;
+        String path = hostLogDir(this) + "/" + name;
         int lines = "rgtools_tree.txt".equals(name) ? 400 : 600;
         // 先问一句文件状态：大小/时间/是否存在都拿得到，用户一眼知道是不是还没生成
         RootShell.Result st = RootShell.run("ls -l '" + path + "' 2>&1");
@@ -830,16 +856,21 @@ public class MainActivity extends Activity {
         LinearLayout col = page("关于", -1, null);
         LinearLayout body = (LinearLayout) holder.get(col);
 
-        LinearLayout card = MiUi.card(this, p, body);
-        infoRow(card, "模块名称", "ReadGuo（红果工具）");
-        infoRow(card, "版本", versionName() + "（" + versionCode() + "）");
-        infoRow(card, "作者", AUTHOR);
-        infoRow(card, "作用域", "红果免费短剧（com.phoenix.read）");
-        infoRow(card, "运行框架", "LSPosed / libxposed API 102");
-        infoRow(card, "构建时间", buildTime());
+        LinearLayout card = MiUi.group(this, p, body, "应用信息");
+        valueRow(card, "模块名称", "ReadGuo");
+        MiUi.divider(this, p, card);
+        valueRow(card, "版本", versionName() + " (" + versionCode() + ")");
+        MiUi.divider(this, p, card);
+        valueRow(card, "作者", AUTHOR);
+        MiUi.divider(this, p, card);
+        valueRow(card, "作用域", "红果免费短剧");
+        MiUi.divider(this, p, card);
+        valueRow(card, "运行框架", "LSPosed / libxposed 102");
+        MiUi.divider(this, p, card);
+        valueRow(card, "构建时间", buildTime());
 
-        LinearLayout open = MiUi.card(this, p, body);
-        LinearLayout line = MiUi.row(this, p, open, "源码仓库", GITHUB, MiUi.I_BOOK);
+        LinearLayout open = MiUi.group(this, p, body, null);
+        LinearLayout line = MiUi.row(this, p, open, "源码仓库", null, MiUi.I_BOOK);
         line.addView(MiUi.chevron(this, p));
         line.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -848,23 +879,50 @@ public class MainActivity extends Activity {
             }
         });
 
-        TextView t = MiUi.groupLabel(this, p, "免责声明");
-        t.setTextColor(p.title);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        t.setTypeface(null, Typeface.BOLD);
-        t.setPadding(dp(4), dp(2), 0, dp(6));
-        body.addView(t);
-
-        LinearLayout dis = MiUi.card(this, p, body);
-        dis.addView(MiUi.body(this, p,
-                "· 本模块仅供学习交流与个人技术研究使用，请勿用于任何商业或非法用途。\n\n"
-                        + "· 本模块不修改、不破解、不绕过任何付费、会员或版权保护机制；"
+        LinearLayout dis = MiUi.group(this, p, body, "免责声明");
+        TextView disBody = MiUi.body(this, p,
+                "本模块仅供学习交流与个人技术研究使用，请勿用于任何商业或非法用途。\n\n"
+                        + "本模块不修改、不破解、不绕过任何付费、会员或版权保护机制；"
                         + "所有功能仅调整本机的界面显示与个人偏好设置。\n\n"
-                        + "· 请在遵守法律法规及平台用户协议的前提下使用；请支持正版，"
+                        + "请在遵守法律法规及平台用户协议的前提下使用；请支持正版，"
                         + "相关内容、商标与软件版权归原作者及平台所有。\n\n"
-                        + "· 本模块按「现状」提供，不附带任何明示或默示的担保；"
+                        + "本模块按「现状」提供，不附带任何明示或默示的担保；"
                         + "因下载、安装或使用本模块而产生的一切后果，由使用者自行承担。\n\n"
-                        + "· 若本模块侵犯了相关方的合法权益，请联系作者删除。"));
+                        + "若本模块侵犯了相关方的合法权益，请联系作者删除。");
+        disBody.setPadding(dp(16), dp(14), dp(16), dp(14));
+        dis.addView(disBody);
+
+        /* --- 模块自身 --- */
+        LinearLayout self = MiUi.group(this, p, body, "模块自身");
+        switchRow(self, "隐藏桌面图标",
+                "关闭后从 LSPosed 模块列表的「打开」进入",
+                iconHidden(), new MiUi.OnToggle() {
+            @Override
+            public void onChanged(boolean on) {
+                applyIconHidden(on);
+            }
+        });
+        MiUi.divider(this, p, self);
+        LinearLayout l1 = MiUi.row(this, p, self, "运行日志",
+                "红果进程里的 hook 记录", MiUi.I_LOG);
+        l1.addView(MiUi.chevron(this, p));
+        l1.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showLog("rgtools_log.txt");
+            }
+        });
+        MiUi.divider(this, p, self);
+        LinearLayout l2 = MiUi.row(this, p, self, "视图树快照",
+                "最近一次导出的视图树", MiUi.I_BOOK);
+        l2.addView(MiUi.chevron(this, p));
+        l2.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showLog("rgtools_tree.txt");
+            }
+        });
+
         return col;
     }
 
@@ -901,7 +959,7 @@ public class MainActivity extends Activity {
 
     private String hostVersion() {
         try {
-            return getPackageManager().getPackageInfo("com.phoenix.read", 0).versionName;
+            return getPackageManager().getPackageInfo(hostPkgResolved(this), 0).versionName;
         } catch (Throwable t) {
             return "未安装";
         }

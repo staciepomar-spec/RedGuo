@@ -1,0 +1,25 @@
+>> D:\CEBIANLAN\File\RedGuo\_tools\sdk_tmp_bt\android-16\aapt2.exe compile --dir C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\res -o C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\res.zip
+>> D:\CEBIANLAN\File\RedGuo\_tools\sdk_tmp_bt\android-16\aapt2.exe link -o C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\unaligned.apk -I D:\CEBIANLAN\File\RedGuo\_tools\sdk_tmp_pf\android-35\android.jar --manifest C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\AndroidManifest.xml --min-sdk-version 29 --target-sdk-version 35 --version-code 91 --version-name 3.06 --auto-add-overlay C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\res.zip
+sources: 21
+>> C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot\bin\javac.exe -encoding UTF-8 -source 8 -target 8 -nowarn -Xlint:none -classpath D:\CEBIANLAN\File\RedGuo\_tools\sdk_tmp_pf\android-35\android.jar;D:\CEBIANLAN\File\RedGuo\_tools\aar_x\classes.jar -d C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\classes C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\src\com\wodi\redguotools\AdBlock.java C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\src\com\wodi\redguotools\CfgBridge.java C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\src\com\wodi\redguotools\Config.java C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\src\com\wodi\redguotools\DarkMode.java C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\src\com\wodi\redguotools\DpiTweak.java C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\src\com\wodi\redguotools\Hosts.java C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\src\com\wodi\redguotools\HotfixBlock.java C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\src\com\wodi\redguotools\MainActivity.java C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\src\com\wodi\redguotools\MiUi.java C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\src\com\wodi\redguotools\ModuleSettings.java C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\src\com\wodi\redguotools\ModuleState.java C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\src\com\wodi\redguotools\Names.java C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\src\com\wodi\redguotools\NoUpdate.java C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\src\com\wodi\redguotools\PlayerTweaks.java C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\src\com\wodi\redguotools\RGModule.java C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\src\com\wodi\redguotools\RootShell.java C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\src\com\wodi\redguotools\SettingsPanel.java C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\src\com\wodi\redguotools\SheetEntry.java C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\src\com\wodi\redguotools\SleepTimer.java C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\src\com\wodi\redguotools\Theme.java C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\src\com\wodi\redguotools\UiController.java
+[stderr] ע: ĳЩ�����ļ�ʹ�û򸲸����ѹ�ʱ�� API��
+ע: �й���ϸ��Ϣ, ��ʹ�� -Xlint:deprecation ���±��롣
+javac classes: 126
+>> D:\CEBIANLAN\File\RedGuo\_tools\sdk_tmp_bt\android-16\d8.bat --lib D:\CEBIANLAN\File\RedGuo\_tools\sdk_tmp_pf\android-35\android.jar --min-api 29 --output C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\dex @C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\d8_args.txt
+dex: [('classes.dex', 201940)]
+>> D:\CEBIANLAN\File\RedGuo\_tools\sdk_tmp_bt\android-16\zipalign.exe -f -p 4 C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\unaligned.apk C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\aligned.apk
+>> D:\CEBIANLAN\File\RedGuo\_tools\sdk_tmp_bt\android-16\apksigner.bat sign --ks C:\Users\Iss.WR\.workbuddy\keys\rgmod.jks --ks-pass pass:android --ks-key-alias rgmod --key-pass pass:android --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true --out D:\CEBIANLAN\File\RedGuo\out\RGTools-3.06.apk C:\Users\Iss.WR\AppData\Local\Temp\rgmod_build\aligned.apk
+>> D:\CEBIANLAN\File\RedGuo\_tools\sdk_tmp_bt\android-16\apksigner.bat verify --min-sdk-version 23 -v D:\CEBIANLAN\File\RedGuo\out\RGTools-3.06.apk
+Verifies
+Verified using v1 scheme (JAR signing): true
+Verified using v2 scheme (APK Signature Scheme v2): true
+Verified using v3 scheme (APK Signature Scheme v3): true
+Verified using v3.1 scheme (APK Signature Scheme v3.1): false
+Verified using v4 scheme (APK Signature Scheme v4): false
+Verified for SourceStamp: false
+Number of signers: 1
+WARNING: META-INF/xposed/java_init.list not protected by signature. Unauthorized modifications to this JAR entry will not be detected. Delete or move the entry outside of META-INF/.
+WARNING: META-INF/xposed/module.prop not protected by signature. Unauthorized modifications to this JAR entry will not be detected. Delete or move the entry outside of META-INF/.
+WARNING: META-INF/xposed/scope.list not protected by signature. Unauthorized modifications to this JAR entry will not be detected. Delete or move the entry outside of META-INF/.
+
+OK -> D:\CEBIANLAN\File\RedGuo\out\RGTools-3.06.apk 243219 bytes

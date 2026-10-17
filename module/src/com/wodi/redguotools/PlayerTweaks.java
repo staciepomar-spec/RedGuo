@@ -145,6 +145,55 @@ final class PlayerTweaks {
         return sPaused;
     }
 
+    /**
+     * 主动暂停**所有正在播放**的引擎（全屏设置界面打开时调用）。
+     *
+     * <p>为什么要遍历：红果同时存在多个 {@code TTVideoEngine}（首页 feed、
+     * 预加载邻页、二级页各一套）。只暂停「最近上报状态的那个」会打错目标 ——
+     * 表现就是面板打开后画面还在走，随后宿主自己翻页，把面板顶掉。
+     *
+     * <p>先读 {@code getPlaybackState()}，只对 state==1（播放中）的下手，
+     * 不碰本来就没播的引擎，避免把邻页设成「暂停」状态。
+     *
+     * @return 本次真正暂停了几个引擎
+     */
+    static int pauseAll() {
+        java.util.List<Object> list = new java.util.ArrayList<>();
+        synchronized (ENGINES) {
+            for (java.util.Map.Entry<Object, Boolean> e : ENGINES.entrySet()) {
+                if (e.getKey() != null && Boolean.TRUE.equals(e.getValue())) {
+                    list.add(e.getKey());
+                }
+            }
+        }
+        int n = 0;
+        Object last = null;
+        for (Object eng : list) {
+            try {
+                eng.getClass().getMethod("pause").invoke(eng);
+                last = eng;
+                n++;
+            } catch (Throwable ignored) {
+            }
+        }
+        if (n > 0) {
+            markPaused(true, "panel", last);
+            long now = android.os.SystemClock.uptimeMillis();
+            if (now - sLastPanelPauseLog > 5000L) {
+                sLastPanelPauseLog = now;
+                UiController.logFile("panel: 已暂停 " + n + " 个播放引擎");
+            }
+        }
+        return n;
+    }
+
+    private static long sLastPanelPauseLog;
+
+    /** 兼容旧调用点：面板打开时暂停一次。 */
+    static boolean pauseCurrent() {
+        return pauseAll() > 0;
+    }
+
     private static void hookPlayPause(XposedModule mod, ClassLoader cl) {
         try {
             Class<?> eng = Class.forName("com.ss.ttvideoengine.TTVideoEngine", false, cl);
@@ -155,6 +204,7 @@ final class PlayerTweaks {
                         .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                         .intercept(chain -> {
                             rememberEngine(chain.getThisObject());
+                            setPlaying(chain.getThisObject(), true);
                             markPaused(false, "play", chain.getThisObject());
                             return chain.proceed();
                         });
@@ -166,6 +216,7 @@ final class PlayerTweaks {
                         .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                         .intercept(chain -> {
                             rememberEngine(chain.getThisObject());
+                            setPlaying(chain.getThisObject(), false);
                             markPaused(true, "pause", chain.getThisObject());
                             return chain.proceed();
                         });
@@ -201,9 +252,36 @@ final class PlayerTweaks {
     private static volatile java.lang.ref.WeakReference<Object> sEngineRef;
     private static volatile int sLastState = Integer.MIN_VALUE;
 
+    /**
+     * 见过的所有播放器引擎，值 = 该引擎当前是否在播。
+     *
+     * <p>红果同时存在多个引擎实例（首页 feed + 预加载的邻页 + 二级页各一个），
+     * 只记「最后一个」在暂停时会打错目标 —— 实测面板打开后视频仍在播，就是
+     * 只暂停了邻页引擎。这里全部收着，按各自状态只暂停真的在播的。
+     *
+     * <p>状态由 play/pause 钩子与 {@code getPlaybackState} 钩子维护，
+     * 不在轮询里查 —— 每 1.2 秒查一次会返回 0（idle），把日志刷成 2/0 交替。
+     */
+    private static final java.util.WeakHashMap<Object, Boolean> ENGINES =
+            new java.util.WeakHashMap<>();
+
     private static void rememberEngine(Object o) {
         if (o != null) {
             sEngineRef = new java.lang.ref.WeakReference<>(o);
+            synchronized (ENGINES) {
+                if (!ENGINES.containsKey(o)) {
+                    ENGINES.put(o, Boolean.FALSE);
+                }
+            }
+        }
+    }
+
+    private static void setPlaying(Object engine, boolean playing) {
+        if (engine == null) {
+            return;
+        }
+        synchronized (ENGINES) {
+            ENGINES.put(engine, playing);
         }
     }
 
@@ -225,6 +303,13 @@ final class PlayerTweaks {
      * 状态码本身可靠，就不需要这个不可靠的兜底了。
      */
     private static void noteState(int st, Object engine) {
+        // 先记「这个引擎在不在播」，再做「状态码没变就跳过」的去重 ——
+        // 否则同一状态重复上报时，引擎的播放标记永远是第一次的值。
+        if (st == 1) {
+            setPlaying(engine, true);
+        } else if (st == 2) {
+            setPlaying(engine, false);
+        }
         if (st == sLastState) {
             return;
         }

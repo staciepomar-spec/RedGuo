@@ -1,6 +1,7 @@
 package com.wodi.redguotools;
 
 import android.app.Activity;
+import android.content.Context;
 import android.content.res.Configuration;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -36,9 +37,16 @@ final class SheetEntry {
 
     /** 识别弹层用的特征行文案（与整行文字相等才算）。 */
     private static final String[] MARKERS = {
-            "不感兴趣", "清屏播放", "弹幕设置", "下载到本地",
+            "倍速", "不感兴趣", "清屏播放", "弹幕设置", "下载到本地",
             "字体大小", "投屏", "定时关闭", "识图找同款",
     };
+
+    /**
+     * 入口要插到这一行<b>之前</b>（倍速是弹层的第一行，插它上面 = 列表顶端）。
+     *
+     * <p>找不到就退化成追加到末尾 —— 入口丢失比位置不对更糟。
+     */
+    private static final String ANCHOR_ROW = "倍速";
 
     /** 命中多少条不同的特征文案才认定是设置弹层。 */
     private static final int MIN_MARKERS = 3;
@@ -114,13 +122,35 @@ final class SheetEntry {
             return;
         }
 
-        // 3) 注入
-        parent.addView(buildRow(a), new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        UiController.logFile("sheet entry injected into " + parent.getClass().getName());
+        // 3) 注入：优先插到「倍速」行之前，找不到锚点才追加到末尾
+        View entry = buildRow(a);
+        LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        int idx = indexOfRowContaining(parent, ANCHOR_ROW);
+        if (idx >= 0) {
+            parent.addView(entry, idx, elp);
+            UiController.logFile("sheet entry inserted before 「" + ANCHOR_ROW + "」 @"
+                    + idx + " in " + parent.getClass().getName());
+        } else {
+            parent.addView(entry, elp);
+            UiController.logFile("sheet entry appended (anchor missing) into "
+                    + parent.getClass().getName());
+        }
     }
 
     /* ------------------------------------------------------------------ */
+
+    /** 容器里第几个直接子节点包含该整行文案；找不到返回 -1。 */
+    private static int indexOfRowContaining(ViewGroup parent, String exact) {
+        for (int i = 0; i < parent.getChildCount(); i++) {
+            List<TextView> tvs = new ArrayList<>();
+            collectTextEquals(parent.getChildAt(i), exact, tvs);
+            if (!tvs.isEmpty()) {
+                return i;
+            }
+        }
+        return -1;
+    }
 
     private static void collectTextEquals(View v, String exact, List<TextView> out) {
         if (v instanceof TextView) {
@@ -202,7 +232,13 @@ final class SheetEntry {
         return null;
     }
 
-    /** 入口行：⚙ ReadGuo 设置 ›，配色沿用模块调色板（白底/深底自适应）。 */
+    /**
+     * 入口行：⚙ ReadGuo 设置 ›。
+     *
+     * <p>配色用 iOS 的「可点击行」处理：淡蓝底 + 蓝色图标 / 文字 / 箭头。
+     * 这一行是插在宿主弹层里的，跟周围「倍速 / 清晰度」那些纯黑白行不同色，
+     * 一眼能认出是别的 App 塞进来的 —— 否则白底行贴在白底弹层上等于隐形。
+     */
     private static View buildRow(final Activity a) {
         final Theme.Palette p = Theme.of(a);
         LinearLayout row = new LinearLayout(a);
@@ -211,19 +247,19 @@ final class SheetEntry {
         row.setMinimumHeight(Theme.dp(a, 54));
         int padX = Theme.dp(a, 16);
         row.setPadding(padX, Theme.dp(a, 10), padX, Theme.dp(a, 10));
-        row.setBackground(Theme.pressable(a, p));
+        row.setBackground(entryBg(a, p));
 
         TextView icon = new TextView(a);
         icon.setText("⚙");
         icon.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
-        icon.setTextColor(p.body);
+        icon.setTextColor(p.primary);
         row.addView(icon, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView title = new TextView(a);
         title.setText("ReadGuo 设置");
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        title.setTextColor(p.title);
+        title.setTextColor(p.primary);
         title.setPadding(Theme.dp(a, 12), 0, 0, 0);
         row.addView(title, new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -231,7 +267,7 @@ final class SheetEntry {
         TextView chevron = new TextView(a);
         chevron.setText("›");
         chevron.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
-        chevron.setTextColor(p.sub);
+        chevron.setTextColor(p.primary);
         row.addView(chevron, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -243,6 +279,27 @@ final class SheetEntry {
             }
         });
         return row;
+    }
+
+    /** 淡蓝底：按下加深一档。用主色透明底而不是灰色，深浅两套都跟得上。 */
+    private static android.graphics.drawable.Drawable entryBg(
+            final Activity a, final Theme.Palette p) {
+        boolean light = (p.card & 0x00FFFFFF) == 0x00FFFFFF;
+        int normal = light ? 0x14007AFF : 0x220A84FF;
+        int pressed = light ? 0x2E007AFF : 0x3D0A84FF;
+        android.graphics.drawable.StateListDrawable s =
+                new android.graphics.drawable.StateListDrawable();
+        s.addState(new int[]{android.R.attr.state_pressed}, solidRound(pressed, a));
+        s.addState(new int[]{}, solidRound(normal, a));
+        return s;
+    }
+
+    private static android.graphics.drawable.GradientDrawable solidRound(int color, Context c) {
+        android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable();
+        g.setShape(android.graphics.drawable.GradientDrawable.RECTANGLE);
+        g.setColor(color);
+        g.setCornerRadius(Theme.dp(c, 12));
+        return g;
     }
 
     private static boolean hasInjected(View v) {

@@ -8,7 +8,9 @@ import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.StateListDrawable;
 import android.util.TypedValue;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.LinearLayout;
 import android.widget.SeekBar;
 import android.widget.Switch;
 import android.widget.TextView;
@@ -50,6 +52,10 @@ final class Theme {
         int thumbOff;    // 开关关闭态滑块（中灰，白底/白球才分得清开关状态）
         int seekTrack;   // 滑块轨道
         int press;       // 列表行按下时的叠加色
+        int divider;     // 行间分割线 #E5E5EA
+        int switchOn;    // 开关打开态轨道（iOS 绿）
+        int segSlot;     // 分段控件底槽
+        int segSel;      // 分段控件选中块
     }
 
     private static final Palette LIGHT = light();
@@ -57,46 +63,62 @@ final class Theme {
 
     private static Palette light() {
         Palette p = new Palette();
-        p.bg = 0xFFFFFFFF;         // 纯白，不用半透明（半透明白会显脏）
-        p.card = 0xFFF8F9FB;       // 与白底仅 1.05:1，必须靠描边成边界
-        p.stroke = 0xFFE3E5EA;     // 描边 / 白底 = 1.26:1，视觉刚好
-        p.primary = 0xFFFF7D29;
-        p.primaryInk = 0xFFC24E12;
-        p.title = 0xFF1A1A1A;      // 17.40:1
-        p.body = 0xFF444444;       // 9.74:1
-        p.sub = 0xFF767676;        // 4.54:1，恰过 AA（原方案的 #868686 只有 3.64:1）
-        p.ghostInk = 0xFF6B6B6B;
-        p.danger = 0xFFC62828;     // 5.62:1（原方案的 #ED4337 只有 3.85:1）
-        p.trackOff = 0xFFC9CFD8;   // 再浅就与卡片同色，关态只剩一个球在飘
-        p.thumbOff = 0xFF8A9099;
-        p.seekTrack = 0xFFE3E5EA;
-        p.press = 0x14000000;
+        // 参考稿是「干净浅色」而不是重透明：页面浅灰白、卡片纯白、蓝色强调。
+        p.bg = 0xFFF4F4F5;         // 页面底：iOS 分组列表的标准灰白
+        p.card = 0xFFFFFFFF;       // 卡片纯白（无边框、无阴影）
+        p.stroke = 0xFFE5E5EA;     // 仅输入框焦点框还会用
+        p.primary = 0xFF007AFF;    // iOS 系统蓝，唯一强调色
+        p.primaryInk = 0xFF007AFF;
+        p.title = 0xFF111111;      // 正文黑
+        p.body = 0xFF111111;
+        p.sub = 0xFF8E8E93;        // 分组标题 / 右侧状态
+        p.ghostInk = 0xFF007AFF;
+        p.danger = 0xFFFF3B30;
+        p.trackOff = 0xFFE3E3E8;   // 关态轨道
+        p.thumbOff = 0xFFFFFFFF;
+        p.seekTrack = 0xFFE5E5EA;
+        p.press = 0x0F000000;      // 按下叠加：中性灰，不用蓝
+        p.divider = 0xFFE5E5EA;
+        p.switchOn = 0xFF34C759;   // iOS 开关绿
+        p.segSlot = 0xFFEFEFF0;
+        p.segSel = 0xFFFFFFFF;
         return p;
     }
 
     private static Palette dark() {
         Palette p = new Palette();
-        p.bg = 0xFF16181C;
-        p.card = 0xFF1F2227;
-        p.stroke = 0xFF2E333A;
-        p.primary = 0xFFFF8F45;
-        p.primaryInk = 0xFFFFB27A;
-        p.title = 0xFFF2F3F5;
-        p.body = 0xFFC9CDD4;
-        p.sub = 0xFF9AA0A8;
-        p.ghostInk = 0xFFADB3BB;
-        p.danger = 0xFFE5645C;
-        p.trackOff = 0xFF4A515A;
-        p.thumbOff = 0xFF9AA0A8;
-        p.seekTrack = 0xFF4A515A;
-        p.press = 0x1AFFFFFF;
+        p.bg = 0xFF000000;         // iOS 深色分组列表底
+        p.card = 0xFF1C1C1E;       // iOS 深色卡片
+        p.stroke = 0xFF38383A;
+        p.primary = 0xFF0A84FF;    // iOS 深色蓝
+        p.primaryInk = 0xFF0A84FF;
+        p.title = 0xFFF2F2F7;
+        p.body = 0xFFEBEBF5;
+        p.sub = 0xFF8E8E93;
+        p.ghostInk = 0xFF0A84FF;
+        p.danger = 0xFFFF453A;
+        p.trackOff = 0xFF3A3A3C;
+        p.thumbOff = 0xFFFFFFFF;
+        p.seekTrack = 0xFF38383A;
+        p.press = 0x24FFFFFF;
+        p.divider = 0xFF38383A;
+        p.switchOn = 0xFF30D158;
+        p.segSlot = 0xFF2C2C2E;
+        p.segSel = 0xFF5B5B60;
         return p;
     }
 
+    /**
+     * 面板配色跟随**宿主当前皮肤**的深浅。
+     *
+     * <p>历史上这里固定返回 LIGHT（v2.97 的决定：宿主深色也保持浅色）。
+     * 但 v3.06 有了「暗色模式」开关之后这个决定不再成立 —— 用户把红果
+     * 切到深色后，重开的面板还是一片白，看起来就像「切换没生效」。
+     * 宿主的深色是换肤（资源后缀），不是 uiMode，所以只能问
+     * {@code SkinManager.isNightMode()}（见 {@link DarkMode#hostIsNight()}）。
+     */
     static Palette of(Context c) {
-        int mode = c.getResources().getConfiguration().uiMode
-                & Configuration.UI_MODE_NIGHT_MASK;
-        return mode == Configuration.UI_MODE_NIGHT_YES ? DARK : LIGHT;
+        return DarkMode.hostIsNight() ? DARK : LIGHT;
     }
 
     /* ==================== 尺寸 ==================== */
@@ -124,9 +146,29 @@ final class Theme {
         return round(p.bg, 0, dp(c, 20), 0);
     }
 
-    /** 分组卡片：浅灰填充 + 1dp 描边。不用 elevation —— 浅色下阴影几乎不可见且显脏。 */
+    /** 分组卡片：纯白 + 16dp 圆角，**无描边、无阴影**（iOS 分组列表）。 */
     static GradientDrawable card(Context c, Palette p) {
-        return round(p.card, p.stroke, dp(c, 12), dp(c, 1));
+        return round(p.card, 0, dp(c, 16), 0);
+    }
+
+    /** 一级顶部的标题卡：极淡的蓝→白渐变，做出「液态」的层次感。 */
+    static GradientDrawable heroCard(Context c, Palette p) {
+        GradientDrawable g = new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                new int[]{0xFFF1F5FF, 0xFFFFFFFF});
+        g.setShape(GradientDrawable.RECTANGLE);
+        g.setCornerRadius(dp(c, 18));
+        return g;
+    }
+
+    /**
+     * 可点击卡片：圆角卡片 + 按下水波纹。
+     * mask 用同形状圆角矩形，否则波纹会溢出到方角外面。
+     */
+    static android.graphics.drawable.RippleDrawable rippleCard(Context c, Palette p) {
+        GradientDrawable mask = round(0xFFFFFFFF, 0, dp(c, 12), 0);
+        return new android.graphics.drawable.RippleDrawable(
+                android.content.res.ColorStateList.valueOf(p.press), card(c, p), mask);
     }
 
     /** 卡片标题栏：按下时叠一层淡色作为触感反馈（不能用 selector 资源，模块没有 res/）。 */
@@ -168,7 +210,7 @@ final class Theme {
         TextView t = new TextView(c);
         t.setText(text);
         t.setTextColor(p.sub);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         return t;
     }
 
@@ -182,9 +224,14 @@ final class Theme {
         return t;
     }
 
-    /** 分组标题：弱化小字，压在每张组卡片上方。 */
+    /** 分组标题：13sp 粗体、#8E8E93，压在卡片上方。 */
     static TextView groupTitle(Context c, Palette p, String text) {
-        TextView t = cardTitle(c, p, text);
+        TextView t = new TextView(c);
+        t.setText(text);
+        t.setTextColor(p.sub);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        t.setTypeface(android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD));
+        t.setIncludeFontPadding(false);
         t.setPadding(0, 0, 0, 0);
         return t;
     }
@@ -194,7 +241,8 @@ final class Theme {
         TextView t = new TextView(c);
         t.setText(text);
         t.setTextColor(p.title);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        t.setIncludeFontPadding(false);
         return t;
     }
 
@@ -203,7 +251,8 @@ final class Theme {
         TextView t = new TextView(c);
         t.setText(text);
         t.setTextColor(p.sub);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        t.setIncludeFontPadding(false);
         return t;
     }
 
@@ -240,9 +289,11 @@ final class Theme {
         Switch s = new Switch(c);
         s.setText(text);
         s.setTextColor(p.body);
-        s.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        s.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         s.setChecked(checked);
-        s.setPadding(0, dp(c, 1), 0, dp(c, 1));
+        // 参考稿的行高偏松：靠内边距把每一行撑到 ~52dp，而不是靠分隔线
+        s.setPadding(0, dp(c, 11), 0, dp(c, 11));
+        s.setMinHeight(dp(c, 52));
         styleSwitch(c, p, s);
         return s;
     }
@@ -260,20 +311,20 @@ final class Theme {
      */
     private static void styleSwitch(Context c, Palette p, Switch s) {
         try {
-            int tw = intrinsic(s.getTrackDrawable(), dp(c, 44), true);
-            int th = intrinsic(s.getTrackDrawable(), dp(c, 24), false);
-            int hw = intrinsic(s.getThumbDrawable(), dp(c, 24), true);
-            int hh = intrinsic(s.getThumbDrawable(), dp(c, 24), false);
+            int tw = dp(c, 51);
+            int th = dp(c, 31);
+            int hw = dp(c, 27);
+            int hh = dp(c, 27);
 
             SizedStateList thumb = new SizedStateList(hw, hh);
             thumb.addState(new int[]{android.R.attr.state_checked},
-                    oval(0xFFFFFFFF, hw, hh));
-            thumb.addState(new int[]{}, oval(p.thumbOff, hw, hh));
+                    ovalRing(0xFFFFFFFF, hw, hh, 0x1A000000));
+            thumb.addState(new int[]{}, ovalRing(0xFFFFFFFF, hw, hh, 0x1A000000));
             s.setThumbDrawable(thumb);
 
             SizedStateList track = new SizedStateList(tw, th);
             track.addState(new int[]{android.R.attr.state_checked},
-                    pill(p.primary, tw, th));
+                    pill(p.switchOn, tw, th));
             track.addState(new int[]{}, pill(p.trackOff, tw, th));
             s.setTrackDrawable(track);
 
@@ -301,6 +352,81 @@ final class Theme {
         g.setColor(fill);
         g.setSize(w, h);
         return g;
+    }
+
+    /** 带 1px 淡描边的白色圆——iOS 开关滑块靠它跟纯白卡面区分开。 */
+    private static GradientDrawable ovalRing(int fill, int w, int h, int ring) {
+        GradientDrawable g = new GradientDrawable();
+        g.setShape(GradientDrawable.OVAL);
+        g.setColor(fill);
+        g.setStroke(1, ring);
+        g.setSize(w, h);
+        return g;
+    }
+
+    /* ==================== 分段控件 ==================== */
+
+    interface OnSegment {
+        void onSelect(int index);
+    }
+
+    /**
+     * iOS 分段控件（Segmented Control）：浅灰底槽 + 选中项白色圆角块 + 细分隔线。
+     *
+     * <p>替代单选按钮 —— 安卓的 RadioButton 是圆圈 + 文字，和 iOS 的形态差得最远，
+     * 而面板里的「状态栏底色」「暗色模式」都只有 2~3 个互斥选项，正适合分段控件。
+     */
+    static LinearLayout segmented(Context c, Palette p, String[] items, int selected,
+                                  final OnSegment cb) {
+        LinearLayout box = new LinearLayout(c);
+        box.setOrientation(LinearLayout.HORIZONTAL);
+        box.setBackground(round(p.segSlot, 0, dp(c, 9), 0));
+        box.setPadding(dp(c, 2), dp(c, 2), dp(c, 2), dp(c, 2));
+
+        final TextView[] tabs = new TextView[items.length];
+        for (int i = 0; i < items.length; i++) {
+            final int idx = i;
+            TextView t = new TextView(c);
+            t.setText(items[i]);
+            t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+            t.setGravity(android.view.Gravity.CENTER);
+            t.setMinHeight(dp(c, 30));
+            t.setIncludeFontPadding(false);
+            t.setPadding(dp(c, 8), dp(c, 6), dp(c, 8), dp(c, 6));
+            t.setClickable(true);
+            t.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    for (int k = 0; k < tabs.length; k++) {
+                        styleSegment(tabs[k], p, k == idx);
+                    }
+                    if (cb != null) {
+                        cb.onSelect(idx);
+                    }
+                }
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            box.addView(t, lp);
+            tabs[i] = t;
+        }
+        for (int i = 0; i < tabs.length; i++) {
+            styleSegment(tabs[i], p, i == selected);
+        }
+        return box;
+    }
+
+    private static void styleSegment(TextView t, Palette p, boolean on) {
+        t.setTextColor(on ? p.title : p.sub);
+        t.setTypeface(android.graphics.Typeface.create("sans-serif",
+                on ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL));
+        if (on) {
+            t.setBackground(round(p.segSel, 0, dp(t.getContext(), 7), 0));
+            t.setElevation(dp(t.getContext(), 1));
+        } else {
+            t.setBackground(null);
+            t.setElevation(0);
+        }
     }
 
     private static GradientDrawable pill(int fill, int w, int h) {
@@ -336,8 +462,20 @@ final class Theme {
     /** SeekBar：轨道浅灰、进度与滑块用主色。 */
     static void styleSeekBar(Palette p, SeekBar b) {
         b.setProgressTintList(ColorStateList.valueOf(p.primary));
-        b.setThumbTintList(ColorStateList.valueOf(p.primary));
         b.setProgressBackgroundTintList(ColorStateList.valueOf(p.seekTrack));
+        // 参考稿的滑块是「白心 + 蓝环」，默认的蓝实心圆显得笨重
+        try {
+            int d = dp(b.getContext(), 18);
+            GradientDrawable thumb = new GradientDrawable();
+            thumb.setShape(GradientDrawable.OVAL);
+            thumb.setColor(0xFFFFFFFF);
+            thumb.setStroke(Math.max(2, dp(b.getContext(), 2)), p.primary);
+            thumb.setSize(d, d);
+            b.setThumb(thumb);
+            b.setThumbOffset(0);
+            b.setSplitTrack(false);
+        } catch (Throwable ignored) {
+        }
     }
 
     /* ---- 按钮：填充 / 描边 / 次级，全部自绘背景 ---- */
@@ -377,14 +515,15 @@ final class Theme {
 
     static Button ghostButton(Context c, Palette p, String text, View.OnClickListener l) {
         Button b = baseButton(c, p, text, l);
-        b.setBackground(round(0x00000000, p.stroke, dp(c, 8), dp(c, 1)));
-        b.setTextColor(p.ghostInk);
+        b.setBackground(round(p.card, 0, dp(c, 12), 0));
+        b.setTextColor(p.primary);
         return b;
     }
 
     static Button dangerButton(Context c, Palette p, String text, View.OnClickListener l) {
         Button b = baseButton(c, p, text, l);
-        b.setBackground(round(0x00000000, p.danger, dp(c, 8), dp(c, 1)));
+        // iOS 的破坏性操作用「白底 + 红字」，不画描边
+        b.setBackground(round(p.card, 0, dp(c, 12), 0));
         b.setTextColor(p.danger);
         return b;
     }

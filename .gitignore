@@ -22,3 +22,34 @@ Thumbs.db
 
 # ---- 工作区本地数据 ----
 .workbuddy/
+
+# ---- 本地逆向 / 验证过程的临时产物 ----
+_apk_3rd/
+_apk_740/
+_apk_gp/
+_apk_host/
+_apk_patched/
+_apk_work/
+_cls*/
+_cfg*.xml
+_j*/
+_rg_*.txt
+_g*.png
+_[a-z]*[0-9]*.png
+_probe*.txt
+_cur.png
+_d_log.txt
+_dec_3rd/
+_dec_e65/
+_fanqie_*.kt
+_cls_*.txt
+_hostapk/
+_jout.txt
+_mc.db
+_pkgdump.txt
+_u2.xml
+_upd_ui.xml
+_userlog*
+_wd.xml
+_wd2.xml
+module/kt/

@@ -32,7 +32,7 @@ public final class Config {
     public static final String[] SLOT_KEYS = {
             "top", "right", "bottom",
             "plbar", "pldanmaku", "plheader", "plhot", "plbottom", "plprogress",
-            "feedfull", "feedrec", "feedtag",
+            "feedfull", "feedrec", "feedtag", "luckybag",
     };
 
     public static final String[] SLOT_NAMES = {
@@ -48,6 +48,7 @@ public final class Config {
             "全屏观看按钮（首页卡片）",
             "备案号水印（首页卡片）",
             "类型标签（剧名下方）",
+            "右侧「领取」挂件（福袋）",
     };
 
     /**
@@ -103,6 +104,14 @@ public final class Config {
             // 它是 com.dragon.read.widget.tag.PriorityTagLayout，实测全树只有 1 个实例。
             // 这排标签之前不在任何槽位里，所以全局透明度拉到底它也不动。
             {"cls:com.dragon.read.widget.tag.PriorityTagLayout"},
+            // 播放页右侧那条竖排「领取」福袋挂件（金币/红包入口）。
+            // 实测树：c42.e[135x261] > ConstraintLayout > root_view
+            //          > SimpleDraweeView(背景) + SimpleDraweeView(图标)
+            //          + LottieAnimationView + d42.d > TextView「领取」
+            // 只有「领取」两个字是文案节点，其余全是图 —— 所以用文案规则交给
+            // boxOf 上溯到容器（高度上限 4×文字高、且子树里没有别的文案，正好停在
+            // c42.e 这一层）。类名 c42.e 是混淆短名，换渠道会变，故不按类名匹配。
+            {"text:领取"},
     };
 
     public static String resolveHint() {
@@ -125,6 +134,33 @@ public final class Config {
         }
         Context app = ctx.getApplicationContext();
         sp = (app != null ? app : ctx).getSharedPreferences(PREF, Context.MODE_PRIVATE);
+
+        // 把模块 App 导到公共目录的配置读回来。
+        // 只在进程内第一次 init 时做一次 —— 之后所有 hook 读到的都是新值。
+        // 模块 App 进程也会走这里，于是它能看到红果侧的最新设置。
+        try {
+            int n = CfgBridge.importFrom(app != null ? app : ctx, sp);
+            if (n > 0) {
+                UiController.logFile("cfg-bridge: 已从公共目录导入 " + n + " 项配置");
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /**
+     * 当前进程用的 SharedPreferences（模块 App 侧导出配置时用）。
+     * 宿主进程里拿它写进去的值，红果下次启动会从公共目录读回来。
+     */
+    static SharedPreferences spOf() {
+        return sp;
+    }
+
+    /** 把当前进程的配置导出到公共目录，供另一个进程读取。返回 null 表示成功。 */
+    static String exportAll(Context c) {
+        if (sp == null) {
+            init(c);
+        }
+        return CfgBridge.export(c, sp);
     }
 
     private static SharedPreferences sp(Context fallback) {
@@ -164,9 +200,30 @@ public final class Config {
 
     /* ---------------- 统一透明度 ---------------- */
 
-    /** 叠加组件不透明度百分比，100 表示不透明。 */
+    /**
+     * 界面透明度：**首页 / 二级播放页上视频以外的所有浮层**统一乘这个系数，
+     * 100 表示保持宿主原样。
+     *
+     * <p>与单项透明度是乘法关系：先按层（视频的兄弟节点整体）降一次，
+     * 命中槽位的单个组件再乘自己的 {@code *_alpha}。写在这里即持久化，
+     * 每次启动 / 切页都会重新应用，只有用户把滑杆拉回 100（或点重置）才还原。
+     */
     public static int alphaPercent(Context c) {
         return getInt(c, "alpha", 100);
+    }
+
+    /**
+     * 横屏播放页是否也参与「界面透明度」。默认关闭。
+     *
+     * <p>横屏是沉浸式观看场景，控件本来就少，整体压到低透明度会让画面像蒙了层灰。
+     * 开启后横竖屏保持一致。
+     */
+    public static boolean alphaLandscape(Context c) {
+        return get(c, "alpha_land", false);
+    }
+
+    public static void setAlphaLandscape(Context c, boolean v) {
+        set(c, "alpha_land", v);
     }
 
     /* ---------------- 双击 ---------------- */
@@ -195,9 +252,21 @@ public final class Config {
 
     /* ---------------- 组件槽位：隐藏 / 透明度 ---------------- */
 
-    /** 某个槽位是否隐藏。默认 false = 显示。 */
+    /** 某个槽位是否隐藏。默认 false = 显示；「领取」福袋例外（默认隐藏）。 */
     public static boolean overlayHide(Context c, String k) {
+        if ("luckybag".equals(k)) {
+            return hideLuckyBag(c);
+        }
         return get(c, k + "_hide", false);
+    }
+
+    /** 写槽位隐藏状态。福袋槽位与「净化」页开关共用同一个配置键。 */
+    public static void setOverlayHide(Context c, String k, boolean v) {
+        if ("luckybag".equals(k)) {
+            setHideLuckyBag(c, v);
+            return;
+        }
+        set(c, k + "_hide", v);
     }
 
     /** 某个槽位的不透明度百分比。默认 100。 */
@@ -445,6 +514,111 @@ public final class Config {
         set(c, "nav_auto", v);
     }
 
+    /* ---------------- 暗色模式 ---------------- */
+
+    /** 跟随系统（不干预宿主自身的深浅色判断）。 */
+    public static final int DARK_FOLLOW = 0;
+    /** 强制浅色。 */
+    public static final int DARK_LIGHT = 1;
+    /** 强制深色。 */
+    public static final int DARK_DARK = 2;
+
+    /**
+     * 暗色模式选择：0 跟随系统 / 1 浅色 / 2 深色。
+     *
+     * <p>默认 0 —— 不填就完全保持宿主原样。宿主自身有「跟随系统」开关，
+     * 且该开关打开时会覆盖偏好值，所以模块必须在运行时纠正而不是写偏好，
+     * 实现见 {@link DarkMode}。
+     */
+    public static int darkMode(Context c) {
+        return getInt(c, "dark_mode", DARK_FOLLOW);
+    }
+
+    public static void setDarkMode(Context c, int v) {
+        setInt(c, "dark_mode", v < 0 || v > 2 ? DARK_FOLLOW : v);
+    }
+
+    /* ---------------- 屏幕密度（DPI） ---------------- */
+
+    /**
+     * 目标 DPI；0 = 跟随系统（不干预）。
+     *
+     * <p>只影响界面尺寸，视频画面不受影响。改动在下一个 Activity 创建时生效。
+     */
+    public static int dpi(Context c) {
+        int v = getInt(c, "dpi", 0);
+        if (v <= 0) {
+            return 0;
+        }
+        return Math.max(DpiTweak.MIN_DPI, Math.min(DpiTweak.MAX_DPI, v));
+    }
+
+    /**
+     * 用 {@code commit()} 而不是 {@code apply()}：密度改完紧接着就要重建界面、
+     * 用户也可能随时杀掉红果，异步落盘会把这一个值丢掉（表现就是「拖了没生效」）。
+     */
+    public static void setDpi(Context c, int v) {
+        int val = v <= 0 ? 0 : Math.max(DpiTweak.MIN_DPI, Math.min(DpiTweak.MAX_DPI, v));
+        try {
+            sp(c).edit().putInt("dpi", val).commit();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /* ---------------- 净化：去广告 / 福袋 / 热更新 ---------------- */
+
+    /**
+     * 拦截全部广告位总闸。默认开启。
+     *
+     * <p>对应 {@code checkAdAvailable(position, source)} 恒返回 false ——
+     * 宿主所有广告位「能不能出广告」的判定都汇聚在这一处，拦它等于全拦，
+     * 宿主以后新增的广告位也自动生效。代价是「看视频得金币」这类用户主动
+     * 的激励入口也会失效（那里已无广告可播）。
+     */
+    public static boolean adGate(Context c) {
+        return get(c, "ad_gate", true);
+    }
+
+    public static void setAdGate(Context c, boolean v) {
+        set(c, "ad_gate", v);
+    }
+
+    /** 拦截开屏广告。默认开启（用户明确要求）。 */
+    public static boolean blockSplashAd(Context c) {
+        return get(c, "ad_splash", true);
+    }
+
+    public static void setBlockSplashAd(Context c, boolean v) {
+        set(c, "ad_splash", v);
+    }
+
+    /** 隐藏信息流里的广告卡片。默认开启。 */
+    public static boolean blockFeedAd(Context c) {
+        return get(c, "ad_feed", true);
+    }
+
+    public static void setBlockFeedAd(Context c, boolean v) {
+        set(c, "ad_feed", v);
+    }
+
+    /** 隐藏播放页的福袋挂件（右侧竖排「领取」浮标）。默认开启。 */
+    public static boolean hideLuckyBag(Context c) {
+        return get(c, "luckybag_hide", true);
+    }
+
+    public static void setHideLuckyBag(Context c, boolean v) {
+        set(c, "luckybag_hide", v);
+    }
+
+    /** 禁用热更新（Reparo）。默认开启 —— Play 版本身没有该框架，此项自动 n/a。 */
+    public static boolean blockHotfix(Context c) {
+        return get(c, "no_hotfix", true);
+    }
+
+    public static void setBlockHotfix(Context c, boolean v) {
+        set(c, "no_hotfix", v);
+    }
+
     /* ---------------- 写 ---------------- */
 
     public static void set(Context c, String key, boolean v) {
@@ -474,6 +648,20 @@ public final class Config {
             return sp(c).getInt(key, def);
         } catch (Throwable t) {
             return def;
+        }
+    }
+
+    /**
+     * 清空**整个模块**的配置（面板里「重置所有设置」）。
+     *
+     * <p>用 {@code commit()} 而不是 {@code apply()}：紧随其后就要让宿主重建界面，
+     * 异步落盘可能赶在重建之后，出现「重置了但这一轮还是旧值」。
+     */
+    public static boolean resetAll(Context c) {
+        try {
+            return sp(c).edit().clear().commit();
+        } catch (Throwable t) {
+            return false;
         }
     }
 }

@@ -26,7 +26,26 @@ import io.github.libxposed.api.XposedModuleInterface;
 public class RGModule extends XposedModule {
 
     public static final String TAG = "RGTools";
-    public static final String HOST_PKG = "com.phoenix.read";
+
+    /**
+     * 宿主包名（同一套代码的三个分发渠道）。数据本体在 {@link Hosts} ——
+     * 那个类不依赖 libxposed，模块 App 进程也能安全读。
+     */
+    public static final String[] HOST_PKGS = Hosts.PKGS;
+
+    /** 兼容旧引用：默认（主测试）宿主包名。需要「当前进程是哪个渠道」时用 {@link #curPkg()}。 */
+    public static final String HOST_PKG = Hosts.DEFAULT;
+
+    private static volatile String sCurPkg;
+
+    /** 当前进程对应的宿主包名；未在宿主进程时为 null。 */
+    public static String curPkg() {
+        return sCurPkg;
+    }
+
+    public static boolean isHostPkg(String pkg) {
+        return Hosts.isHost(pkg);
+    }
 
     /** 短剧全屏播放页里承载 onDoubleTap 的手势监听类（多版本候选，存在即挂）。 */
     private static final String[] DOUBLE_TAP_CLASSES = {
@@ -37,9 +56,11 @@ public class RGModule extends XposedModule {
             "com.dragon.read.component.shortvideo.impl.fullscreen.f$d",
             // 7.3.9.32：feed 双击点赞走社交层手势（实测屏蔽 i$d 后仍会点赞）
             "com.dragon.read.social.ui.t",
-            // 7.3.9.32：短剧 v2 竖滑适配器的双击监听（feed 与二级页共用，
+            // 7.3.9.32 短剧 v2 竖滑适配器的双击监听（feed 与二级页共用，
             // dt2 诊断日志确认真实触发，屏蔽后双击点赞消失）
+            // 改版 com.phoenix.read → r65.o0；Play 版同结构类 → o15.o0
             "r65.o0",
+            "o15.o0",
     };
 
     private ClassLoader appLoader;
@@ -49,11 +70,11 @@ public class RGModule extends XposedModule {
         super.onPackageReady(param);
         String pkg = param.getPackageName();
         appLoader = param.getClassLoader();
-        log(Log.INFO, TAG, "onPackageReady pkg=" + pkg);
-
-        if (!HOST_PKG.equals(pkg)) {
+        if (!isHostPkg(pkg)) {
             return;
         }
+        sCurPkg = pkg;
+        log(Log.INFO, TAG, "onPackageReady pkg=" + pkg);
         try {
             hookActivity(appLoader);
         } catch (Throwable t) {
@@ -103,6 +124,30 @@ public class RGModule extends XposedModule {
         } catch (Throwable t) {
             log(Log.ERROR, TAG, "hookViewAttach failed", t);
         }
+        try {
+            hookAppContext(appLoader);
+            log(Log.INFO, TAG, "hooked app context");
+        } catch (Throwable t) {
+            log(Log.ERROR, TAG, "hookAppContext failed", t);
+        }
+        try {
+            AdBlock.hook(this, appLoader);
+            log(Log.INFO, TAG, "ad block: " + AdBlock.status());
+        } catch (Throwable t) {
+            log(Log.ERROR, TAG, "hookAdBlock failed", t);
+        }
+        try {
+            DarkMode.hook(this, appLoader);
+            log(Log.INFO, TAG, "dark mode: " + DarkMode.status());
+        } catch (Throwable t) {
+            log(Log.ERROR, TAG, "hookDarkMode failed", t);
+        }
+        try {
+            HotfixBlock.hook(this, appLoader);
+            log(Log.INFO, TAG, "hotfix block: " + HotfixBlock.status());
+        } catch (Throwable t) {
+            log(Log.ERROR, TAG, "hookHotfix failed", t);
+        }
     }
 
     /**
@@ -115,6 +160,27 @@ public class RGModule extends XposedModule {
      * <p>这是全进程每个 View 挂载都会走的点，所以回调体必须极轻：
      * 只做两次 volatile 读 + 必要时 post 一个消息。
      */
+    /**
+     * 尽早拿到宿主 Application：开屏广告的判定发生在 SplashActivity.onCreate 里，
+     * 比 {@link UiController#onActivityCreated}（onCreate 返回后）更早。
+     * {@code Instrumentation.callApplicationOnCreate} 是 Application 创建的唯一入口，
+     * 无论子类是否覆写 onCreate 都会走到。
+     */
+    private void hookAppContext(ClassLoader cl) throws Throwable {
+        Method m = android.app.Instrumentation.class.getDeclaredMethod(
+                "callApplicationOnCreate", Application.class);
+        m.setAccessible(true);
+        hook(m).setId("rgAppCtx").setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                .intercept(chain -> {
+                    try {
+                        Application app = (Application) chain.getArg(0);
+                        UiController.setAppCtx(app);
+                    } catch (Throwable ignored) {
+                    }
+                    return chain.proceed();
+                });
+    }
+
     private void hookViewAttach() throws Throwable {
         Method m = View.class.getDeclaredMethod("onAttachedToWindow");
         m.setAccessible(true);
@@ -135,6 +201,15 @@ public class RGModule extends XposedModule {
         Method onCreate = Activity.class.getDeclaredMethod("onCreate", Bundle.class);
         hook(onCreate).setId("rgActCreate").setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                 .intercept(chain -> {
+                    Activity act = (Activity) chain.getThisObject();
+                    // DPI 必须赶在 inflate 之前改写：已测量的 View 不会重新排版。
+                    // 放在 proceed() 前，此时 Resources 已 attach、setContentView 尚未调用。
+                    try {
+                        if (isHostPkg(act.getPackageName())) {
+                            DpiTweak.applyTo(act);
+                        }
+                    } catch (Throwable ignored) {
+                    }
                     Object r = chain.proceed();
                     try {
                         UiController.onActivityCreated((Activity) chain.getThisObject());

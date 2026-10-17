@@ -1,18 +1,25 @@
 package com.wodi.redguotools;
 
 import android.app.Activity;
+import android.content.ContentResolver;
+import android.content.ContentUris;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.res.Configuration;
 import android.content.res.Resources;
+import android.database.Cursor;
 import android.graphics.Insets;
 import android.graphics.Color;
+import android.net.Uri;
 import android.os.Build;
 import android.os.BatteryManager;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.provider.MediaStore;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.GestureDetector;
@@ -147,6 +154,24 @@ public final class UiController {
         return sAppCtx;
     }
 
+    /**
+     * 由 {@code Instrumentation.callApplicationOnCreate} 钩子提前注入。
+     *
+     * <p>必须在 Application.onCreate 之前拿到：开屏广告的判定
+     * （{@code AttributionManager.hasHitAttribution}）发生在 SplashActivity.onCreate 内，
+     * 而 {@link #onActivityCreated} 要等该 Activity 的 onCreate 返回后才跑，
+     * 光靠那条路径会赶不上。
+     */
+    public static void setAppCtx(Context c) {
+        if (sAppCtx == null && c != null) {
+            sAppCtx = c;
+            try {
+                Config.init(c);
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
     private UiController() {
     }
 
@@ -165,7 +190,7 @@ public final class UiController {
     }
 
     private static boolean isHost(Activity a) {
-        return a != null && RGModule.HOST_PKG.equals(a.getPackageName());
+        return a != null && Hosts.isHost(a.getPackageName());
     }
 
     /** 该 Activity 是否属于红果（供 RGModule 的生命周期钩子判断，避免误统计别家 App）。 */
@@ -186,11 +211,14 @@ public final class UiController {
     public static void logFile(String msg) {
         synchronized (LOG_LOCK) {
             try {
-                Activity a = sTop;
-                if (a == null) {
+                // 启动早期（SplashActivity.onCreate 里）还没有栈顶 Activity，
+                // 但 Application 已经拿到 —— 用它兜底，否则开屏广告这类
+                // 「最早发生的事件」会一条日志都留不下。
+                Context c = sTop != null ? sTop : sAppCtx;
+                if (c == null) {
                     return;
                 }
-                File dir = a.getExternalFilesDir(null);
+                File dir = c.getExternalFilesDir(null);
                 if (dir == null) {
                     return;
                 }
@@ -252,6 +280,18 @@ public final class UiController {
         if (ss != null) {
             logFile("sleep-timer install: " + ss);
         }
+        String ds = DarkMode.status();
+        if (ds != null) {
+            logFile("dark install: " + ds);
+        }
+        String hs = HotfixBlock.status();
+        if (hs != null) {
+            logFile("hotfix install: " + hs);
+        }
+        String as = AdBlock.status();
+        if (as != null) {
+            logFile("ad install: " + as);
+        }
         try {
             SleepTimer.ensureGuardDir(a.getApplicationContext());
         } catch (Throwable ignored) {
@@ -280,6 +320,13 @@ public final class UiController {
         }
         sTop = a;
         logFile("activity resumed: " + a.getClass().getName());
+        // 暗色模式：宿主可能按「跟随系统」把皮肤改回浅色，这里做运行时纠正
+        // （状态一致时内部直接返回，无反射调用开销）
+        try {
+            DarkMode.apply(a);
+        } catch (Throwable t) {
+            Log.e(TAG, "apply dark mode failed", t);
+        }
         // 前台计数 +1（与 RGModule 的 onStop 钩子配对），供导航栏「仅退出时恢复」判断
         onAppForeground(a);
         try {
@@ -413,6 +460,18 @@ public final class UiController {
             public void run() {
                 Activity fg = topActivity();
                 if (fg != null && isHost(fg)) {
+                    /*
+                     * 设置面板开着时，宿主仍可能自己起播（feed 自动翻页、预加载引擎
+                     * 接管、从二级页回来）—— 视频一响，面板就会被顶掉。所以每轮
+                     * 补一次暂停，并要求面板跟着前台页面迁移，而不是留在旧页面上。
+                     */
+                    if (SettingsPanel.isShowing()) {
+                        SettingsPanel.ensureOn(fg);
+                        try {
+                            PlayerTweaks.pauseAll();
+                        } catch (Throwable ignored) {
+                        }
+                    }
                     try {
                         applyOverlays(fg);
                     } catch (Throwable ignored) {
@@ -436,6 +495,70 @@ public final class UiController {
             applyOverlays(a);
         } catch (Throwable t) {
             Log.e(TAG, "refresh failed", t);
+        }
+    }
+
+    /**
+     * 「重置所有设置」的运行时收尾。
+     *
+     * <p>配置清空只解决「下次读什么」，但视图上的 alpha、被隐藏的组件、底部标签栏、
+     * 导航栏都是**运行时状态**，不会自己回去。这里先把层透明度与导航栏还原，
+     * 再让宿主 {@code recreate()} —— 新树完全按默认值重建，不留任何残留。
+     */
+    public static void resetRuntime(final Activity a) {
+        if (a == null || !isHost(a)) {
+            return;
+        }
+        try {
+            restoreLayerAlpha();
+            MISS_LOGGED.clear();
+            MISS_DUMPED.clear();
+            restoreNavBar(a);
+            NAV_HIDDEN_MARK.remove(a);
+            View decor = a.getWindow().getDecorView();
+            decor.post(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        a.recreate();
+                        logFile("reset: 已清空配置并重建界面");
+                    } catch (Throwable t) {
+                        logFile("reset recreate failed: " + t);
+                    }
+                }
+            });
+        } catch (Throwable t) {
+            logFile("reset failed: " + t);
+        }
+    }
+
+    /**
+     * 「屏幕密度」这类**改了必须重新测量**的配置，落地后重建当前 Activity。
+     *
+     * <p>透明度 / 显隐改完直接 {@link #refresh} 就够（写的是同一个 View 的 alpha），
+     * 但 dp→px 的换算结果在布局 measure 时就定死了：不重建界面就看不到变化。
+     *
+     * <p>重建期间 Activity 会被销毁，挂在它上面的设置面板随之消失 —— 所以调用方
+     * 要先 {@code dismiss()} 面板再调这里，否则会留下一个泄漏的窗口。
+     */
+    public static void recreateActivity(final Activity a) {
+        if (a == null || !isHost(a) || a.isFinishing()) {
+            return;
+        }
+        try {
+            a.getWindow().getDecorView().post(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        a.recreate();
+                        logFile("recreate: 界面已按新配置重建");
+                    } catch (Throwable t) {
+                        logFile("recreate failed: " + t);
+                    }
+                }
+            });
+        } catch (Throwable t) {
+            logFile("recreate failed: " + t);
         }
     }
 
@@ -596,6 +719,9 @@ public final class UiController {
         // 那一刻还原一次守不住（v2.65 之前「暂停后组件有时不显示」的根源之一）。
         if (pauseRestoreFor(a)) {
             int n = restoreAlphaOnly(root);
+            // 层级别（视频以外的浮层整体）同样要还原，否则暂停时只有槽位变回原样、
+            // 其余浮层还是半透明，看起来像「还原没生效」。
+            restoreLayerAlpha();
             if (!sPauseRestored) {
                 sPauseRestored = true;
                 logFile("pause: 进入暂停，还原 alpha " + n + " 处");
@@ -636,7 +762,10 @@ public final class UiController {
             TaskGroup g = new TaskGroup("[slot]" + key,
                     "[slot]" + key + " " + join(Config.SLOT_RULES[i]));
             groups.add(g);
-            int eff = alpha * global / 100;
+            // 全局系数**不在这里乘**：命中视图可能已经被「层级别」整体降过一次
+            // （见 applyLayerAlpha），在这里再乘会平方。统一放到命中后的
+            // allocateGlobal 里按「是否已在被降层内」分配。
+            int eff = alpha;
             for (String rule : Config.SLOT_RULES[i]) {
                 addTask(tasks, g, rule, hide, eff);
             }
@@ -656,7 +785,7 @@ public final class UiController {
             groups.add(g);
             // 自定义清单项用 GONE：用户单独挑出来要藏的就是小件，
             // 藏了还留一块占位空缺会看着别扭（v2.67 用户反馈）。
-            addTask(tasks, g, it[0], hide, alpha * global / 100, true);
+            addTask(tasks, g, it[0], hide, alpha, true);
         }
 
         IdentityHashMap<View, int[]> desired = new IdentityHashMap<>();
@@ -670,7 +799,37 @@ public final class UiController {
         }
 
         long t1 = SystemClock.uptimeMillis();
+        /*
+         * 横屏默认**不参与**界面透明度。横屏是沉浸式观看场景，控件本来就少，
+         * 把它们整体压到 29% 会让画面像蒙了层灰，观感明显变差。
+         * 需要的人可以在设置里单独打开。
+         */
+        if (!Config.alphaLandscape(a) && isLandscape(a) && global < 100) {
+            // 从竖屏切过来的：先把之前写进去的层透明度还原，否则会一直挂着
+            restoreLayerAlpha();
+            global = 100;
+        }
+        /*
+         * 界面透明度（视频除外）：以视频容器为锚点，把它所在路径上每一层的
+         * 兄弟节点整体降透明 —— 见 collectOverlayLayers 的注释。
+         *
+         * 命中槽位的视图如果已经落在这些层里，就不再乘一次全局系数（否则平方）；
+         * 只有在层外的（比如页面根之外的顶部导航栏）才按旧规则单独乘。
+         */
+        IdentityHashMap<View, Boolean> layers = collectOverlayLayers(root, global < 100);
+        if (global < 100) {
+            for (IdentityHashMap.Entry<View, int[]> e : desired.entrySet()) {
+                int[] d = e.getValue();
+                if (d[0] == 0 && !underAnyLayer(e.getKey(), layers)) {
+                    d[1] = d[1] * global / 100;
+                }
+            }
+        }
         applyDesired(root, desired);
+        // 顺序很重要：层级别必须**最后**写。槽位里也包含 i47（底部进度条容器）这类
+        // 本身就是层的节点，先写层会被 applyDesired 按槽位透明度覆盖回 1.0，
+        // 表现就是「除了进度条，别的都淡了」。
+        applyLayerAlpha(layers, global / 100f);
         long costWrite = SystemClock.uptimeMillis() - t1;
         applyBottomTabs(root, a);
         applyIdleClear(root, a);
@@ -1321,6 +1480,191 @@ public final class UiController {
                 applyDesired(g.getChildAt(i), desired);
             }
         }
+    }
+
+    /* ---------------- 界面透明度：视频以外的浮层整体降透明 ---------------- */
+
+    /** 视频容器的资源 id（首页卡片与二级播放页都用 i62 包住播放器视图）。0 = 当前版本没有。 */
+    private static int sVideoBoxId = -1;
+
+    /**
+     * 记录每个被整体降过透明的层的「宿主原值 / 我们写入的值」。
+     *
+     * <p>为什么不直接 setAlpha(系数)：宿主自己也在动这些层的 alpha（控制栏淡入
+     * 淡出、选集面板弹出动画）。绝对写入会和它打架 —— 它淡到 0，我们 1.2 秒后
+     * 又按 0.4 压回去，界面就会出现「该消失的浮层一直半透明挂着」。
+     * 这里按「宿主当前值 × 系数」写，宿主一变就以新值为基准重新乘，淡出照样淡出。
+     */
+    private static final WeakHashMap<View, float[]> LAYER_ALPHA = new WeakHashMap<>();
+
+    private static int videoBoxId(View root) {
+        if (sVideoBoxId >= 0) {
+            return sVideoBoxId;
+        }
+        int id = 0;
+        try {
+            id = root.getResources().getIdentifier("i62", "id",
+                    root.getContext().getPackageName());
+        } catch (Throwable ignored) {
+        }
+        sVideoBoxId = Math.max(0, id);
+        return sVideoBoxId;
+    }
+
+    /**
+     * 收集「视频以外的浮层」。
+     *
+     * <p>锚点是 id=i62 的视频容器：把它每一层祖先的**兄弟节点**都收进来，
+     * 直到页面根（ViewPager2 / RecyclerView 的直接子节点）为止。效果：
+     * <ul>
+     *   <li>视频本身（i62 及其子树）永远不碰；</li>
+     *   <li>顶栏 / 右侧互动 / 标题 / 选集条 / 进度条这些同层浮层一次全收；</li>
+     *   <li>不越出页面根，页面外的背景图、底部标签栏不受影响。</li>
+     * </ul>
+     *
+     * @param enabled false 表示只做还原（返回 null）
+     */
+    private static IdentityHashMap<View, Boolean> collectOverlayLayers(View root, boolean enabled) {
+        if (!enabled) {
+            return null;
+        }
+        int id = videoBoxId(root);
+        if (id == 0) {
+            return null;
+        }
+        IdentityHashMap<View, Boolean> out = new IdentityHashMap<>();
+        collectLayersInner(root, id, out);
+        return out.isEmpty() ? null : out;
+    }
+
+    private static void collectLayersInner(View v, int id, IdentityHashMap<View, Boolean> out) {
+        if (v.getId() == id && v.getWidth() > 0 && v.getHeight() > 0) {
+            addSiblingsAlongPath(v, out);
+        }
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                collectLayersInner(g.getChildAt(i), id, out);
+            }
+        }
+    }
+
+    /** 从视频容器往上走，把每一层「不是通往视频的那个孩子」的兄弟收进 out。 */
+    private static void addSiblingsAlongPath(View anchor, IdentityHashMap<View, Boolean> out) {
+        View pageRoot = pageRootOf(anchor);
+        View child = anchor;
+        for (int guard = 0; guard < 12; guard++) {
+            ViewParent p = child.getParent();
+            if (!(p instanceof ViewGroup)) {
+                return;
+            }
+            ViewGroup parent = (ViewGroup) p;
+            for (int i = 0; i < parent.getChildCount(); i++) {
+                View s = parent.getChildAt(i);
+                if (s != child) {
+                    out.put(s, Boolean.TRUE);
+                }
+            }
+            if (parent == pageRoot) {
+                return;
+            }
+            child = parent;
+        }
+    }
+
+    /** 页面根 = ViewPager2 / RecyclerView 的直接子节点（再往上就是列表容器本身）。 */
+    private static View pageRootOf(View anchor) {
+        View cur = anchor;
+        for (int guard = 0; guard < 12; guard++) {
+            ViewParent p = cur.getParent();
+            if (!(p instanceof View)) {
+                return cur;
+            }
+            String cn = p.getClass().getName();
+            if (cn.contains("ViewPager") || cn.contains("RecyclerView")
+                    || cn.contains("ListView")) {
+                return cur;
+            }
+            cur = (View) p;
+        }
+        return cur;
+    }
+
+    /** 视图本身或它的任一祖先是否已经被整体降过透明（用于避免平方）。 */
+    private static boolean underAnyLayer(View v, IdentityHashMap<View, Boolean> layers) {
+        if (layers == null || layers.isEmpty()) {
+            return false;
+        }
+        if (layers.containsKey(v)) {
+            return true;
+        }
+        ViewParent p = v.getParent();
+        for (int guard = 0; guard < 12; guard++) {
+            if (!(p instanceof View)) {
+                return false;
+            }
+            if (layers.containsKey(p)) {
+                return true;
+            }
+            p = ((View) p).getParent();
+        }
+        return false;
+    }
+
+    /**
+     * 按系数写入层的 alpha；系数 >= 1 或没有层时还原所有记录。
+     * 宿主自己改过 alpha 的层以新值为基准（见 {@link #LAYER_ALPHA}）。
+     */
+    private static void applyLayerAlpha(IdentityHashMap<View, Boolean> layers, float factor) {
+        if (layers == null || layers.isEmpty() || factor >= 1f) {
+            restoreLayerAlpha();
+            return;
+        }
+        // 已经不在当前页面的旧视图：还原本值，丢掉记录
+        Iterator<java.util.Map.Entry<View, float[]>> it = LAYER_ALPHA.entrySet().iterator();
+        while (it.hasNext()) {
+            java.util.Map.Entry<View, float[]> e = it.next();
+            View v = e.getKey();
+            if (v == null || !layers.containsKey(v)) {
+                if (v != null) {
+                    v.setAlpha(e.getValue()[0]);
+                }
+                it.remove();
+            }
+        }
+        for (View v : layers.keySet()) {
+            if (v == null) {
+                continue;
+            }
+            float cur = v.getAlpha();
+            float[] rec = LAYER_ALPHA.get(v);
+            if (rec == null) {
+                rec = new float[]{cur, -1f};
+                LAYER_ALPHA.put(v, rec);
+            } else if (Math.abs(cur - rec[1]) > 0.002f) {
+                // 宿主自己改过（淡入淡出 / 动画）→ 以它为准重新取基准
+                rec[0] = cur;
+            }
+            float target = Math.max(0f, Math.min(1f, rec[0] * factor));
+            if (Math.abs(cur - target) > 0.002f) {
+                v.setAlpha(target);
+            }
+            rec[1] = target;
+        }
+    }
+
+    /** 把整体降过透明的层恢复成宿主原值。 */
+    private static void restoreLayerAlpha() {
+        if (LAYER_ALPHA.isEmpty()) {
+            return;
+        }
+        for (java.util.Map.Entry<View, float[]> e : LAYER_ALPHA.entrySet()) {
+            View v = e.getKey();
+            if (v != null) {
+                v.setAlpha(e.getValue()[0]);
+            }
+        }
+        LAYER_ALPHA.clear();
     }
 
     /* ---------------- 暂停时还原组件显示 ---------------- */
@@ -2599,28 +2943,167 @@ public final class UiController {
     /* 调试：把视图树写进文件（真机 logcat 被屏蔽，所以同时落盘）              */
     /* ------------------------------------------------------------------ */
 
-    public static void logTree(Activity a) {
-        View decor = a.getWindow().getDecorView();
-        if (decor == null) {
-            return;
-        }
-        StringBuilder sb = new StringBuilder();
-        appendTree(decor, 0, sb);
-        for (String line : sb.toString().split("\n")) {
-            Log.i(TAG, "TREE " + line);
+    /**
+     * 把当前视图树写到**模块自己的**外部文件目录（自动落盘用，不进公共目录）。
+     *
+     * @return 写成功时返回文件的绝对路径；失败返回 null（调用方据此给提示）
+     */
+    public static String logTree(Activity a) {
+        String text = buildTree(a);
+        if (text == null) {
+            return null;
         }
         try {
             File dir = a.getExternalFilesDir(null);
             if (dir != null) {
                 File f = new File(dir, "rgtools_tree.txt");
                 FileOutputStream fos = new FileOutputStream(f, false);
-                fos.write(sb.toString().getBytes("UTF-8"));
+                fos.write(text.getBytes("UTF-8"));
                 fos.close();
                 logFile("tree written: " + f.getAbsolutePath() + " views="
-                        + sb.toString().split("\n").length);
+                        + text.split("\n").length);
+                return f.getAbsolutePath();
             }
+            logFile("tree write failed: external files dir is null");
         } catch (Throwable t) {
             Log.e(TAG, "write tree failed", t);
+            logFile("tree write failed: " + t);
+        }
+        return null;
+    }
+
+    /** 只负责把当前界面摊成文本（不含落盘）。 */
+    private static String buildTree(Activity a) {
+        View decor = a.getWindow().getDecorView();
+        if (decor == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        appendTree(decor, 0, sb);
+        for (String line : sb.toString().split("\n")) {
+            Log.i(TAG, "TREE " + line);
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 「导出日志」：把视图树 + 运行日志写到公共 `Documents/`，供用户直接用文件管理器查看。
+     *
+     * <p>为什么不直接 File 写 `/storage/emulated/0/Documents`：红果 targetSdk 35，
+     * 分区存储下直接写公共目录会被拒（需要 MANAGE_EXTERNAL_STORAGE，模块不可能去要）。
+     * 走 {@code MediaStore.Files} + {@code RELATIVE_PATH=Documents/} 才能免权限落盘。
+     *
+     * <p>同名文件会先查后覆盖（只查得到本模块自己写过的那份），不会产生
+     * `rgtools_tree (1).txt` 这种堆叠。MediaStore 不可用时回退到模块私有目录。
+     *
+     * @return 实际使用的目录（带结尾 `/`），全部失败返回 null
+     */
+    public static String exportLogs(Activity a) {
+        if (a == null) {
+            return null;
+        }
+        String tree = buildTree(a);
+        String treePath = tree == null ? null
+                : writeToDocuments(a, "rgtools_tree.txt", "text/plain", tree);
+
+        String logText = "";
+        File logFile = null;
+        try {
+            File dir = a.getExternalFilesDir(null);
+            if (dir != null) {
+                logFile = new File(dir, "rgtools_log.txt");
+                if (logFile.exists()) {
+                    logText = readTail(logFile, 256 * 1024);
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        String logPath = writeToDocuments(a, "rgtools_log.txt", "text/plain", logText);
+
+        if (treePath != null || logPath != null) {
+            String p = treePath != null ? treePath : logPath;
+            int cut = p.lastIndexOf('/');
+            return cut > 0 ? p.substring(0, cut + 1) : p;
+        }
+        // 公共目录拿不到时，退回模块自己的外部目录，至少文件还在
+        try {
+            File dir = a.getExternalFilesDir(null);
+            if (dir != null) {
+                logFile = new File(dir, "rgtools_log.txt");
+                return dir.getAbsolutePath() + "/";
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    /** 往公共 Documents/ 写一个文本文件（MediaStore，免存储权限），返回展示用绝对路径。 */
+    private static String writeToDocuments(Activity a, String name, String mime, String content) {
+        try {
+            ContentResolver cr = a.getContentResolver();
+            Uri collection = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
+            String rel = Environment.DIRECTORY_DOCUMENTS + "/";
+            Uri target = null;
+            Cursor c = null;
+            try {
+                c = cr.query(collection, new String[]{MediaStore.Files.FileColumns._ID},
+                        MediaStore.Files.FileColumns.DISPLAY_NAME + "=? AND "
+                                + MediaStore.Files.FileColumns.RELATIVE_PATH + "=?",
+                        new String[]{name, rel}, null);
+                if (c != null && c.moveToFirst()) {
+                    target = ContentUris.withAppendedId(collection, c.getLong(0));
+                }
+            } finally {
+                if (c != null) {
+                    c.close();
+                }
+            }
+            if (target == null) {
+                ContentValues cv = new ContentValues();
+                cv.put(MediaStore.Files.FileColumns.DISPLAY_NAME, name);
+                cv.put(MediaStore.Files.FileColumns.MIME_TYPE, mime);
+                cv.put(MediaStore.Files.FileColumns.RELATIVE_PATH, rel);
+                target = cr.insert(collection, cv);
+            }
+            if (target == null) {
+                logFile("export: insert failed " + name);
+                return null;
+            }
+            java.io.OutputStream os = cr.openOutputStream(target, "wt");
+            if (os == null) {
+                logFile("export: openOutputStream failed " + name);
+                return null;
+            }
+            os.write(content.getBytes("UTF-8"));
+            os.close();
+            return Environment.getExternalStorageDirectory().getAbsolutePath()
+                    + "/" + Environment.DIRECTORY_DOCUMENTS + "/" + name;
+        } catch (Throwable t) {
+            logFile("export failed " + name + ": " + t);
+            return null;
+        }
+    }
+
+    /** 读文件末尾一段（日志可能很大，只带最后 maxBytes，避免一次塞爆 MediaStore）。 */
+    private static String readTail(File f, int maxBytes) {
+        try {
+            long len = f.length();
+            long skip = Math.max(0, len - maxBytes);
+            java.io.FileInputStream in = new java.io.FileInputStream(f);
+            if (skip > 0) {
+                in.skip(skip);
+            }
+            java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                bo.write(buf, 0, n);
+            }
+            in.close();
+            String s = bo.toString("UTF-8");
+            return skip > 0 ? ("…（仅保留最后 " + (maxBytes / 1024) + "KB）\n" + s) : s;
+        } catch (Throwable t) {
+            return "";
         }
     }
 
