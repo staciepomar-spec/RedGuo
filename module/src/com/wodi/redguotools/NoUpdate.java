@@ -92,7 +92,7 @@ final class NoUpdate {
                     "com.dragon.read.component.biz.impl.update.UpdateManager", false, cl);
             Method h = um.getDeclaredMethod("h");
             h.setAccessible(true);
-            mod.hook(h).setId("rgNoUpdateOfficial")
+            mod.hook(h)
                     .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                     .intercept(chain -> {
                         Context c = UiController.appCtx();
@@ -127,7 +127,7 @@ final class NoUpdate {
         try {
             Method show = Dialog.class.getDeclaredMethod("show");
             show.setAccessible(true);
-            mod.hook(show).setId("rgNoUpdateSignature")
+            mod.hook(show)
                     .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                     .intercept(chain -> {
                         Object r = chain.proceed();   // 放行：让弹窗正常 inflate

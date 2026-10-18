@@ -127,6 +127,17 @@ public final class Config {
      * 注意：不能用 createPackageContext 去拿模块自己的 SharedPreferences——
      * 宿主进程与模块包不是同一个 UID，读到的是无法写入的目录，set 会静默失败。
      * 面板与 Hook 都跑在宿主进程里，因此直接用宿主自己的存储即可。
+     *
+     * <p><b>v3.07：跨进程导入已移除。</b>原先这里会从公共目录读一份模块 App 导出的
+     * 配置，实测那条通道在 Android 11+ 上<b>根本不成立</b>：
+     * <ul>
+     *   <li>文件是模块 App 用 MediaStore 建的，属主是它的 uid、权限 770，
+     *       宿主属于 others → {@code File.exists()} 恒 false；</li>
+     *   <li>MediaStore 兜底也读不了：宿�� targetSdk 35 且没有「所有文件访问」
+     *       授权，{@code openInputStream} 打不开别的 App 写的非媒体文件。</li>
+     * </ul>
+     * 留着只会静默失败，让用户以为「改了没生效」。设置一律在红果内面板里改，
+     * 那是唯一真正连通的通道。
      */
     public static synchronized void init(Context ctx) {
         if (sp != null || ctx == null) {
@@ -134,33 +145,6 @@ public final class Config {
         }
         Context app = ctx.getApplicationContext();
         sp = (app != null ? app : ctx).getSharedPreferences(PREF, Context.MODE_PRIVATE);
-
-        // 把模块 App 导到公共目录的配置读回来。
-        // 只在进程内第一次 init 时做一次 —— 之后所有 hook 读到的都是新值。
-        // 模块 App 进程也会走这里，于是它能看到红果侧的最新设置。
-        try {
-            int n = CfgBridge.importFrom(app != null ? app : ctx, sp);
-            if (n > 0) {
-                UiController.logFile("cfg-bridge: 已从公共目录导入 " + n + " 项配置");
-            }
-        } catch (Throwable ignored) {
-        }
-    }
-
-    /**
-     * 当前进程用的 SharedPreferences（模块 App 侧导出配置时用）。
-     * 宿主进程里拿它写进去的值，红果下次启动会从公共目录读回来。
-     */
-    static SharedPreferences spOf() {
-        return sp;
-    }
-
-    /** 把当前进程的配置导出到公共目录，供另一个进程读取。返回 null 表示成功。 */
-    static String exportAll(Context c) {
-        if (sp == null) {
-            init(c);
-        }
-        return CfgBridge.export(c, sp);
     }
 
     private static SharedPreferences sp(Context fallback) {
@@ -563,6 +547,46 @@ public final class Config {
             sp(c).edit().putInt("dpi", val).commit();
         } catch (Throwable ignored) {
         }
+    }
+
+    /* ---------------- 弹幕：强制显示 ---------------- */
+
+    /**
+     * 强制显示弹幕。默认关闭 —— 不开就完全保持宿主原样。
+     *
+     * <p>见 {@link Danmaku}：实现是写宿主自己的 SharedPreferences，不是 hook。
+     */
+    public static boolean danmakuForce(Context c) {
+        return get(c, "danmaku_force", false);
+    }
+
+    public static void setDanmakuForce(Context c, boolean v) {
+        set(c, "danmaku_force", v);
+    }
+
+    /**
+     * 强制打开之前，宿主那两个弹幕开关键的原始值（用于关闭时还原）。
+     *
+     * <p>格式 {@code <user键是否存在>|<user值>|<ab键是否存在>|<ab值>}，
+     * 空串表示「还没强制过」，即无需还原。
+     */
+    public static String danmakuBak(Context c) {
+        try {
+            return sp(c).getString("danmaku_force_bak", "");
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    public static void setDanmakuBak(Context c, String v) {
+        try {
+            sp(c).edit().putString("danmaku_force_bak", v == null ? "" : v).commit();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    public static void clearDanmakuBak(Context c) {
+        setDanmakuBak(c, "");
     }
 
     /* ---------------- 净化：去广告 / 福袋 / 热更新 ---------------- */

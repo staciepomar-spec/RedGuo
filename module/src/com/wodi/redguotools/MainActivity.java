@@ -108,6 +108,9 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // 模块 App 自己也会崩（设置页开关、root 调用…），同样要留下堆栈，
+        // 否则「App 内闪退」依旧查不到。装在 super 之后、任何界面构建之前。
+        CrashGuard.install(getApplicationContext());
         p = MiUi.pal(this);
         lightSystemBars();
 
@@ -120,7 +123,7 @@ public class MainActivity extends Activity {
         FrameLayout content = new FrameLayout(this);
         root.addView(content, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
-        mPages = new View[]{homePage(), featurePage(), settingsPage(), aboutPage()};
+        mPages = new View[]{homePage(), featurePage(), aboutPage()};
         for (int i = 0; i < mPages.length; i++) {
             content.addView(mPages[i], new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -253,8 +256,12 @@ public class MainActivity extends Activity {
         bar.setPadding(0, dp(6), 0, dp(4));
         wrap.addView(bar, blp);
 
-        String[] names = {"主页", "功能", "设置", "关于"};
-        int[] icons = {MiUi.I_HOME, MiUi.I_SLIDERS, MiUi.I_GEAR, MiUi.I_INFO};
+        // v3.07 起只保留三页：所有设置都在红果内的模块面板里改。
+        // 模块 App 原先也有一个「设置」页，但它要把配置送到红果只能靠公共目录下的
+        // 一个文件，而那条通道在 Android 11+ 已经死了（详见 CfgBridge 被移除的说明），
+        // 留着只会让人以为改了就生效 —— 一个静默失效的入口比没有更糟。
+        String[] names = {"主页", "功能", "关于"};
+        int[] icons = {MiUi.I_HOME, MiUi.I_SLIDERS, MiUi.I_INFO};
         mTabs = new View[names.length];
         for (int i = 0; i < names.length; i++) {
             final int idx = i;
@@ -422,6 +429,17 @@ public class MainActivity extends Activity {
         TextView stateNote = MiUi.body(this, p, note);
         stateNote.setPadding(MiUi.dp(this, 16), MiUi.dp(this, 2), MiUi.dp(this, 16), MiUi.dp(this, 14));
         st.addView(stateNote);
+
+        /* ---------- 去哪改设置（v3.07 起本 App 不再有设置页） ---------- */
+        LinearLayout where = MiUi.group(this, p, body, "在哪改设置");
+        TextView whereNote = MiUi.body(this, p,
+                "所有开关都在红果里改，本 App 只负责说明状态与版本。\n\n"
+                        + "· 播放页：点右上角「⋮」→ 播放设置 → 最下方「ReadGuo 设置」\n"
+                        + "· 任意页面：长按底部「首页」标签直接唤出面板");
+        whereNote.setLineSpacing(MiUi.dp(this, 3), 1f);
+        whereNote.setPadding(MiUi.dp(this, 16), MiUi.dp(this, 14),
+                MiUi.dp(this, 16), MiUi.dp(this, 14));
+        where.addView(whereNote);
 
         /* ---------- 设备 ---------- */
         LinearLayout dev = MiUi.group(this, p, body, "设备与版本");
@@ -600,14 +618,12 @@ public class MainActivity extends Activity {
         }
     }
 
-    /* ==================== 设置页 ==================== */
-
-    private View settingsPage() {
-        LinearLayout col = page("设置", -1, null);
-        LinearLayout body = (LinearLayout) holder.get(col);
-        ModuleSettings.build(this, p, body);
-        return col;
-    }
+    /* ==================== 设置页（v3.07 已移除） ==================== */
+    /*
+     * 原先这里挂 ModuleSettings.build()。
+     * 删除原因见 bottomBar() 处的注释：那条配置通道在 Android 11+ 已经死了，
+     * 页面留着只会让用户以为「改了就生效」。
+     */
 
     /** 卡片内一行开关：标题 + 副标题 + 右侧开关（行高与普通列表行一致）。 */
     private void switchRow(LinearLayout card, String title, String sub, boolean on,
@@ -865,7 +881,7 @@ public class MainActivity extends Activity {
         MiUi.divider(this, p, card);
         valueRow(card, "作用域", "红果免费短剧");
         MiUi.divider(this, p, card);
-        valueRow(card, "运行框架", "LSPosed / libxposed 102");
+        valueRow(card, "运行框架", "LSPosed / libxposed 100+");
         MiUi.divider(this, p, card);
         valueRow(card, "构建时间", buildTime());
 
@@ -927,19 +943,6 @@ public class MainActivity extends Activity {
     }
 
     /* ==================== 小工具 ==================== */
-
-    private void refreshSettings() {
-        // 设置页的开关状态与副标题是快照，重建一次最省事
-        View old = mPages[2];
-        View fresh = settingsPage();
-        ViewGroup parent = (ViewGroup) old.getParent();
-        int idx = parent.indexOfChild(old);
-        parent.removeViewAt(idx);
-        parent.addView(fresh, idx, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        mPages[2] = fresh;
-        fresh.setVisibility(mTab == 2 ? View.VISIBLE : View.GONE);
-    }
 
     private String versionName() {
         try {

@@ -72,14 +72,22 @@ public final class SettingsPanel {
         if (sDialog == null || !sDialog.isShowing() || fg == null || sActivity == fg) {
             return;
         }
+        if (dead(fg)) {
+            return;
+        }
         final String keep = sGroup;
         try {
             sDialog.dismiss();
         } catch (Throwable ignored) {
         }
-        show(fg);
-        if (keep != null && sDialog != null) {
-            renderGroup(fg, Theme.of(fg), keep, groupTitleOf(keep));
+        try {
+            show(fg);
+            if (keep != null && sDialog != null) {
+                renderGroup(fg, Theme.of(fg), keep, groupTitleOf(keep));
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "ensureOn failed", t);
+            UiController.crashDump("ensureOn", t);
         }
     }
 
@@ -97,10 +105,16 @@ public final class SettingsPanel {
     }
 
     public static void show(final Activity a) {
-        if (isShowing()) {
+        if (isShowing() || dead(a)) {
             return;
         }
-        final Theme.Palette p = Theme.of(a);
+        final Theme.Palette p;
+        try {
+            p = Theme.of(a);
+        } catch (Throwable t) {
+            UiController.crashDump("show:palette", t);
+            return;
+        }
 
         // 全屏界面一盖，视频继续播既看不见也没意义 —— 进来先暂停。
         // 只暂停不自动恢复：用户关掉面板后自己点一下继续更符合预期。
@@ -501,9 +515,40 @@ public final class SettingsPanel {
                                     String text, boolean checked,
                                     CompoundButton.OnCheckedChangeListener l) {
         Switch sw = Theme.makeSwitch(a, p, text, checked);
-        sw.setOnCheckedChangeListener(l);
+        sw.setOnCheckedChangeListener(guard(text, l));
         parent.addView(sw);
         return sw;
+    }
+
+    /**
+     * 给开关回调包一层护栏。
+     *
+     * <p><b>为什么必须包</b>：这些回调跑在**宿主进程的主线程**上，且直接
+     * {@code Config.set()} → {@code refresh()} → 可能 {@code recreate()}。
+     * 里面任何一处抛异常，都是整个红果闪退，而用户那边只会得到一句
+     * 「点了开关就崩」，连是哪一行都不知道 —— 已经收到过这种反馈。
+     * <p>
+     * 包住之后：异常变成一条日志 + 一次提示，界面还在，其它开关照样能用。
+     * 这不是掩盖问题，是把「一次闪退」降级成「一个功能不生效」，
+     * 同时把现场（堆栈）留下来。
+     */
+    private static CompoundButton.OnCheckedChangeListener guard(
+            final String what, final CompoundButton.OnCheckedChangeListener l) {
+        if (l == null) {
+            return null;
+        }
+        return new CompoundButton.OnCheckedChangeListener() {
+            @Override
+            public void onCheckedChanged(CompoundButton b, boolean v) {
+                try {
+                    l.onCheckedChanged(b, v);
+                } catch (Throwable t) {
+                    Log.e(TAG, "switch failed: " + what, t);
+                    UiController.logFile("panel: switch '" + what + "' failed " + t);
+                    UiController.crashDump("switch:" + what, t);
+                }
+            }
+        };
     }
 
     /** 折叠行：标题 + 状态摘要 + 箭头，点击展开/收起 body；状态按 key 持久化。 */
@@ -938,6 +983,24 @@ public final class SettingsPanel {
                 });
         divider(a, p, card);
 
+        switchRow(a, p, card, "强制显示弹幕", Config.danmakuForce(a),
+                new CompoundButton.OnCheckedChangeListener() {
+                    @Override
+                    public void onCheckedChanged(CompoundButton b, boolean v) {
+                        Config.setDanmakuForce(a, v);
+                        Danmaku.apply(a);
+                    }
+                });
+        TextView dmHint = Theme.hint(a, p,
+                "有些设备/账号上宿主下发的弹幕默认值是关的，弹幕就怎么都不出来。"
+                        + "打开后本模块会直接把宿主自己的弹幕开关写成开启（下次进入播放页生效）。"
+                        + "关闭时：以前自己拨过弹幕开关的会按原值还原；"
+                        + "从没拨过的（就是没弹幕的那类设备）宿主存储层删不掉这个键，"
+                        + "需要在红果自己的弹幕开关里关掉。");
+        dmHint.setPadding(0, 0, 0, Theme.dp(a, 6));
+        card.addView(dmHint);
+        divider(a, p, card);
+
         switchRow(a, p, card, "自定义倍速（关闭 = 跟随宿主）", Config.speedCustomOn(a),
                 new CompoundButton.OnCheckedChangeListener() {
                     @Override
@@ -1190,21 +1253,58 @@ public final class SettingsPanel {
 
     /** 清单/开关结构变了直接重建比增量刷新简单可靠。 */
     private static void rebuild(final Activity a) {
+        if (dead(a)) {
+            return;
+        }
         // 重建前记住当前分组：全屏两级结构下，重建后回到一级会让用户
         // 刚操作的二级页「跳走」，体验很差。
         final String keep = sGroup;
-        if (sDialog != null) {
-            sDialog.dismiss();
-        }
-        a.getWindow().getDecorView().post(new Runnable() {
-            @Override
-            public void run() {
-                show(a);
-                if (keep != null && sDialog != null) {
-                    renderGroup(a, Theme.of(a), keep, groupTitleOf(keep));
-                }
+        try {
+            if (sDialog != null) {
+                sDialog.dismiss();
             }
-        });
+        } catch (Throwable t) {
+            UiController.crashDump("rebuild:dismiss", t);
+        }
+        try {
+            a.getWindow().getDecorView().post(new Runnable() {
+                @Override
+                public void run() {
+                    // post 回来时页面可能已经被宿主换掉（DPI 重建、暗色换肤、切剧），
+                    // 对着死掉的 Activity new Dialog + show 会抛 BadTokenException，
+                    // 而这正好是「点了某个开关就闪退」的典型现场。
+                    if (dead(a)) {
+                        return;
+                    }
+                    try {
+                        show(a);
+                        if (keep != null && sDialog != null) {
+                            renderGroup(a, Theme.of(a), keep, groupTitleOf(keep));
+                        }
+                    } catch (Throwable t) {
+                        Log.e(TAG, "rebuild failed", t);
+                        UiController.crashDump("rebuild:show", t);
+                    }
+                }
+            });
+        } catch (Throwable t) {
+            UiController.crashDump("rebuild:post", t);
+        }
+    }
+
+    /** Activity 是否已经不可用（正在结束 / 已销毁 / 窗口没了）。 */
+    private static boolean dead(Activity a) {
+        if (a == null) {
+            return true;
+        }
+        try {
+            if (a.isFinishing() || a.isDestroyed()) {
+                return true;
+            }
+            return a.getWindow() == null || a.getWindow().getDecorView() == null;
+        } catch (Throwable t) {
+            return true;
+        }
     }
 
     /* ---------------- 行构建 ---------------- */

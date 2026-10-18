@@ -73,7 +73,7 @@ final class PlayerTweaks {
             Class<?> pp = Class.forName("com.ss.ttm.player.PlaybackParams", false, cl);
             Method setSpeed = pp.getDeclaredMethod("setSpeed", float.class);
             setSpeed.setAccessible(true);
-            mod.hook(setSpeed).setId("rgPlayerSpeed")
+            mod.hook(setSpeed)
                     .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                     .intercept(chain -> {
                         float orig = (Float) chain.getArg(0);
@@ -101,7 +101,7 @@ final class PlayerTweaks {
             Class<?> impl = Class.forName("com.ss.ttvideoengine.TTVideoEngineImpl", false, cl);
             Method cfg = impl.getDeclaredMethod("configResolution", resCls);
             cfg.setAccessible(true);
-            mod.hook(cfg).setId("rgPlayerRes")
+            mod.hook(cfg)
                     .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                     .intercept(chain -> {
                         if (qualityOn() && sMaxRes != null && chain.getArg(0) != sMaxRes) {
@@ -200,7 +200,7 @@ final class PlayerTweaks {
             int n = 0;
             Method play = findNoArg(eng, "play");
             if (play != null) {
-                mod.hook(play).setId("rgPlay")
+                mod.hook(play)
                         .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                         .intercept(chain -> {
                             rememberEngine(chain.getThisObject());
@@ -212,7 +212,7 @@ final class PlayerTweaks {
             }
             Method pause = findNoArg(eng, "pause");
             if (pause != null) {
-                mod.hook(pause).setId("rgPause")
+                mod.hook(pause)
                         .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                         .intercept(chain -> {
                             rememberEngine(chain.getThisObject());
@@ -229,7 +229,7 @@ final class PlayerTweaks {
             try {
                 Method st = findNoArg(eng, "getPlaybackState");
                 if (st != null) {
-                    mod.hook(st).setId("rgPlayState")
+                    mod.hook(st)
                             .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                             .intercept(chain -> {
                                 rememberEngine(chain.getThisObject());

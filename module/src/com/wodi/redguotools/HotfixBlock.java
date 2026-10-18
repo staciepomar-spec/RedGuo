@@ -64,7 +64,7 @@ final class HotfixBlock {
         try {
             Method doInit = cls.getDeclaredMethod("doInit", Application.class);
             doInit.setAccessible(true);
-            mod.hook(doInit).setId("rgNoHotfixInit")
+            mod.hook(doInit)
                     .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                     .intercept(chain -> {
                         if (!sBlockedOnce) {
@@ -80,7 +80,7 @@ final class HotfixBlock {
         try {
             Method load = cls.getDeclaredMethod("loadRemotePatch");
             load.setAccessible(true);
-            mod.hook(load).setId("rgNoHotfixLoad")
+            mod.hook(load)
                     .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                     .intercept(chain -> {
                         UiController.logFile("hotfix: blocked loadRemotePatch");

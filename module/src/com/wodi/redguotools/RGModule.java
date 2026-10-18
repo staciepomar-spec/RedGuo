@@ -74,6 +74,8 @@ public class RGModule extends XposedModule {
             return;
         }
         sCurPkg = pkg;
+        Hosts.setCurPkg(pkg);
+        cacheFrameworkInfo();
         log(Log.INFO, TAG, "onPackageReady pkg=" + pkg);
         try {
             hookActivity(appLoader);
@@ -148,6 +150,12 @@ public class RGModule extends XposedModule {
         } catch (Throwable t) {
             log(Log.ERROR, TAG, "hookHotfix failed", t);
         }
+        try {
+            Danmaku.init(appLoader);
+            log(Log.INFO, TAG, "danmaku: " + Danmaku.status());
+        } catch (Throwable t) {
+            log(Log.ERROR, TAG, "initDanmaku failed", t);
+        }
     }
 
     /**
@@ -170,21 +178,32 @@ public class RGModule extends XposedModule {
         Method m = android.app.Instrumentation.class.getDeclaredMethod(
                 "callApplicationOnCreate", Application.class);
         m.setAccessible(true);
-        hook(m).setId("rgAppCtx").setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+        hook(m).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                 .intercept(chain -> {
                     try {
                         Application app = (Application) chain.getArg(0);
                         UiController.setAppCtx(app);
+                        // 取证要尽早：开屏阶段的崩溃也指望它留记录
+                        CrashGuard.install(app);
                     } catch (Throwable ignored) {
                     }
                     return chain.proceed();
                 });
     }
 
+    /* ---------------- 框架信息（给崩溃日志用的环境快照） ---------------- */
+
+    private void cacheFrameworkInfo() {
+        try {
+            Hosts.setFramework(getFrameworkName(), getFrameworkVersion(), getApiVersion());
+        } catch (Throwable ignored) {
+        }
+    }
+
     private void hookViewAttach() throws Throwable {
         Method m = View.class.getDeclaredMethod("onAttachedToWindow");
         m.setAccessible(true);
-        hook(m).setId("rgViewAttach")
+        hook(m)
                 .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                 .intercept(chain -> {
                     Object r = chain.proceed();     // 先让视图真正挂上去
@@ -199,7 +218,7 @@ public class RGModule extends XposedModule {
 
     private void hookActivity(ClassLoader cl) throws Throwable {
         Method onCreate = Activity.class.getDeclaredMethod("onCreate", Bundle.class);
-        hook(onCreate).setId("rgActCreate").setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+        hook(onCreate).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                 .intercept(chain -> {
                     Activity act = (Activity) chain.getThisObject();
                     // DPI 必须赶在 inflate 之前改写：已测量的 View 不会重新排版。
@@ -219,7 +238,7 @@ public class RGModule extends XposedModule {
                 });
 
         Method onResume = Activity.class.getDeclaredMethod("onResume");
-        hook(onResume).setId("rgActResume").setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+        hook(onResume).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                 .intercept(chain -> {
                     Object r = chain.proceed();
                     try {
@@ -230,7 +249,7 @@ public class RGModule extends XposedModule {
                 });
 
         Method dispatch = Activity.class.getDeclaredMethod("dispatchTouchEvent", MotionEvent.class);
-        hook(dispatch).setId("rgActTouch").setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+        hook(dispatch).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                 .intercept(chain -> {
                     Object self = chain.getThisObject();
                     if (self instanceof Activity) {
@@ -248,7 +267,7 @@ public class RGModule extends XposedModule {
         // 前台状态跟踪：用来区分「App 内部切页面」与「真的离开 App」。
         // 导航栏全程隐藏，只有整个 App 退到后台才恢复 —— 见 UiController.onAppBackground()。
         Method onStop = Activity.class.getDeclaredMethod("onStop");
-        hook(onStop).setId("rgActStop").setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+        hook(onStop).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                 .intercept(chain -> {
                     Object self = chain.getThisObject();
                     Object r = chain.proceed();
@@ -274,7 +293,7 @@ public class RGModule extends XposedModule {
             for (Method m : cls.getDeclaredMethods()) {
                 String n = m.getName();
                 if ("clearFullScreenFlag".equals(n) || "hideStatusBar".equals(n)) {
-                    hook(m).setId("rgSb_" + n).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                    hook(m).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                             .intercept(chain -> {
                                 Activity act = currentTopActivity();
                                 if (act != null && Config.hideStatusBar(act)) {
@@ -312,7 +331,7 @@ public class RGModule extends XposedModule {
                         || !MotionEvent.class.equals(m.getParameterTypes()[0])) {
                     continue;
                 }
-                hook(m).setId("rgDoubleTap_" + cn)
+                hook(m)
                         .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                         .intercept(chain -> {
                             Activity act = UiController.activityOf(chain.getThisObject());
@@ -365,7 +384,7 @@ public class RGModule extends XposedModule {
                         continue;
                     }
                     m.setAccessible(true);
-                    hook(m).setId("rgDtDiag_" + cn)
+                    hook(m)
                             .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                             .intercept(chain -> {
                                 try {
@@ -392,7 +411,7 @@ public class RGModule extends XposedModule {
      */
     private void hookSheetWindows(ClassLoader cl) throws Throwable {
         Method show = Dialog.class.getDeclaredMethod("show");
-        hook(show).setId("rgSheetDlg").setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+        hook(show).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                 .intercept(chain -> {
                     Object r = chain.proceed();
                     try {
@@ -415,7 +434,7 @@ public class RGModule extends XposedModule {
                 if (!mn.equals(m.getName()) || m.getParameterCount() == 0) {
                     continue;
                 }
-                hook(m).setId("rgSheetPw_" + mn + m.getParameterCount())
+                hook(m)
                         .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                         .intercept(chain -> {
                             Object r = chain.proceed();

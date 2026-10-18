@@ -98,7 +98,7 @@ final class DarkMode {
         try {
             Method init = mgr.getDeclaredMethod("initSKinMode");
             init.setAccessible(true);
-            mod.hook(init).setId("rgDarkInit")
+            mod.hook(init)
                     .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                     .intercept(chain -> {
                         Object r = chain.proceed();

@@ -139,7 +139,7 @@ final class SleepTimer {
                 continue;
             }
             c.setAccessible(true);
-            mod.hook(c).setId("rgSleepTimer")
+            mod.hook(c)
                     .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                     .intercept(chain -> {
                         Object r = chain.proceed();   // 构造函数照常执行

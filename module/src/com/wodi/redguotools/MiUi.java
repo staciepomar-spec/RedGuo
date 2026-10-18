@@ -614,9 +614,15 @@ final class MiUi {
                 performClick();
                 animateTo(!on);
                 on = !on;
-                OnToggle l = (OnToggle) getTag();
-                if (l != null) {
-                    l.onChanged(on);
+                // 用 instanceof 而不是直接强转：调用方一旦往 tag 里塞了别的东西，
+                // 直接 (OnToggle) getTag() 就是 ClassCastException，
+                // 而这里正处在点击事件里 —— 一次强转就把整个设置页点崩（v3.07 实测）。
+                Object tag = getTag();
+                if (tag instanceof OnToggle) {
+                    ((OnToggle) tag).onChanged(on);
+                } else if (tag != null) {
+                    android.util.Log.e("RGTools",
+                            "MiSwitch tag must be MiUi.OnToggle, got " + tag.getClass().getName());
                 }
             }
             return true;

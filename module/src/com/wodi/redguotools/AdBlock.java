@@ -184,7 +184,7 @@ final class AdBlock {
                 return false;
             }
             m.setAccessible(true);
-            mod.hook(m).setId(id)
+            mod.hook(m)
                     .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                     .intercept(chain -> {
                         if (gateOn()) {
@@ -265,7 +265,7 @@ final class AdBlock {
             }
             Method m = cls.getDeclaredMethod("canShowScreenAd", Object.class);
             m.setAccessible(true);
-            mod.hook(m).setId("adSplash")
+            mod.hook(m)
                     .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                     .intercept(chain -> {
                         Context c = UiController.appCtx();
@@ -291,7 +291,7 @@ final class AdBlock {
         try {
             Method getAd = cls.getDeclaredMethod("getAd");
             getAd.setAccessible(true);
-            mod.hook(getAd).setId("adFeedGet")
+            mod.hook(getAd)
                     .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                     .intercept(chain -> {
                         Context c = UiController.appCtx();
@@ -310,7 +310,7 @@ final class AdBlock {
             try {
                 Method m = cls.getDeclaredMethod(mn);
                 m.setAccessible(true);
-                mod.hook(m).setId("adFeedReq_" + mn)
+                mod.hook(m)
                         .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                         .intercept(chain -> {
                             Context c = UiController.appCtx();

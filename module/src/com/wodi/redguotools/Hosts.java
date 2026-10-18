@@ -43,6 +43,45 @@ final class Hosts {
         return false;
     }
 
+    /* ---------------- 运行环境快照（崩溃取证用） ---------------- */
+    /*
+     * 同样不能放 RGModule：CrashGuard 要在**模块 App 进程**里也能跑（App 自己也会闪退），
+     * 而那里拿不到 libxposed。所以框架信息由 RGModule 在宿主进程里写入这里，
+     * 两个进程都只读这个纯数据类。
+     */
+
+    private static volatile String fwName = "?";
+    private static volatile String fwVer = "?";
+    private static volatile int apiVer = -1;
+    private static volatile String curPkg;
+
+    static void setFramework(String name, String ver, int api) {
+        fwName = name == null ? "?" : name;
+        fwVer = ver == null ? "?" : ver;
+        apiVer = api;
+    }
+
+    static void setCurPkg(String pkg) {
+        curPkg = pkg;
+    }
+
+    static String frameworkName() {
+        return fwName;
+    }
+
+    static String frameworkVersion() {
+        return fwVer;
+    }
+
+    static int apiVersion() {
+        return apiVer;
+    }
+
+    /** 当前进程对应的宿主包名；不在宿主进程里时为 null（App 进程内即 null）。 */
+    static String modifiedBy() {
+        return curPkg == null ? "?" : curPkg;
+    }
+
     private Hosts() {
     }
 }

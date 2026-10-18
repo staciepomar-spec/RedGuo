@@ -30,7 +30,7 @@ final class Names {
             {"like", "👍", "点赞按钮"},
             {"collect", "⭐", "收藏按钮"},
             {"avatar", "🧑", "头像"},
-            {"slidingtab", "🔝", "顶部导航栏"},
+            {"slidingtab", "🔝", "顶部标签条"},
             {"rightview", "📋", "右侧互动栏"},
             {"infobottom", "📃", "底部信息条"},
             {"infoheader", "📄", "标题行"},
@@ -70,6 +70,14 @@ final class Names {
     static String[] describe(String rule) {
         if (rule != null && !rule.isEmpty()) {
             String k = rule.toLowerCase();
+            // SlidingTabLayout 有「父级 / 自身」两种藏法，藏的东西完全不同，
+            // 而组件显隐里的「顶部导航栏（首页）」用的正是 pcls:（父级）。
+            // 两者如果都叫「顶部导航栏」，用户勾了 cls: 那条会以为藏的是同一样东西，
+            // 结果只少了「漫剧/推荐」两个标签、☰ 和 🔍 孤零零留着 —— 看着像界面错位。
+            // （实测踩过：用户把 cls: 那条加进自定义清单，以为坏了。）
+            if (k.contains("slidingtab") && k.startsWith("pcls:")) {
+                return new String[]{"🔝", "顶部导航栏（含菜单/搜索）"};
+            }
             for (String[] t : TABLE) {
                 if (k.contains(t[0])) {
                     return new String[]{t[1], t[2]};

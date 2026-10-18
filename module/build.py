@@ -34,8 +34,8 @@ JAVA = os.path.join(JAVA_HOME, "bin", "java.exe")
 
 MIN_SDK = "29"
 TARGET_SDK = "35"
-VERSION_CODE = "91"
-VERSION_NAME = "3.06"
+VERSION_CODE = "93"
+VERSION_NAME = "3.08"
 
 
 def run(cmd, cwd=None, check=True):

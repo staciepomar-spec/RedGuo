@@ -231,6 +231,16 @@ public final class UiController {
         }
     }
 
+    /**
+     * 把已捕获、未致命的异常写进崩溃文件。
+     *
+     * <p>护栏接住的异常不会让进程死掉，但用户视角仍是「功能没反应」，
+     * 不留痕就等于没有反馈入口。统一走这里，崩溃证据集中在一份文件里。
+     */
+    public static void crashDump(String where, Throwable t) {
+        CrashGuard.record(where, t);
+    }
+
     private static void resetLogFile(Activity a) {
         try {
             File dir = a.getExternalFilesDir(null);
@@ -326,6 +336,12 @@ public final class UiController {
             DarkMode.apply(a);
         } catch (Throwable t) {
             Log.e(TAG, "apply dark mode failed", t);
+        }
+        // 弹幕强制显示：宿主可能在别处把开关拨回去，进页面时补一次
+        try {
+            Danmaku.apply(a);
+        } catch (Throwable t) {
+            Log.e(TAG, "apply danmaku failed", t);
         }
         // 前台计数 +1（与 RGModule 的 onStop 钩子配对），供导航栏「仅退出时恢复」判断
         onAppForeground(a);
